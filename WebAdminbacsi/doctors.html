@@ -117,6 +117,7 @@
       </div>
     </div>
 
+    <!-- MODAL THÊM BÁC SĨ -->
     <div
       class="modal fade"
       id="addDoctorModal"
@@ -161,13 +162,23 @@
                 </div>
                 <div class="col-md-6">
                   <label class="form-label fw-bold">Mã Số ID (Id)</label>
-                  <input
-                    type="number"
-                    id="doc-id"
-                    class="form-control"
-                    placeholder="Ví dụ: 112"
-                    required
-                  />
+                  <div class="input-group">
+                    <input
+                      type="number"
+                      id="doc-id"
+                      class="form-control"
+                      placeholder="Click nút để tạo ID ngẫu nhiên"
+                      required
+                      readonly
+                    />
+                    <button
+                      class="btn btn-outline-primary"
+                      type="button"
+                      id="btn-random-id"
+                    >
+                      <i class="fas fa-dice"></i> Số ngẫu nhiên
+                    </button>
+                  </div>
                 </div>
                 <div class="col-md-6">
                   <label class="form-label fw-bold">Họ và Tên Bác Sĩ</label>
@@ -181,13 +192,9 @@
                 </div>
                 <div class="col-md-6">
                   <label class="form-label fw-bold">Chuyên Khoa</label>
-                  <input
-                    type="text"
-                    id="doc-special"
-                    class="form-control"
-                    placeholder="Ví dụ: Nha khoa, Nhi khoa"
-                    required
-                  />
+                  <select id="doc-special" class="form-select" required>
+                    <option value="">Đang tải dữ liệu từ Firebase...</option>
+                  </select>
                 </div>
                 <div class="col-md-4">
                   <label class="form-label fw-bold">Số Năm Kinh Nghiệm</label>
@@ -256,6 +263,130 @@
               </button>
               <button type="submit" class="btn btn-success">
                 <i class="fas fa-save me-1"></i>Lưu Vào Firebase
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL HỘP THOẠI SỬA BÁC SĨ -->
+    <div
+      class="modal fade"
+      id="editDoctorModal"
+      tabindex="-1"
+      aria-hidden="true"
+    >
+      <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+          <div class="modal-header bg-warning text-dark">
+            <h5 class="modal-title">
+              <i class="fas fa-user-edit me-2"></i>Chỉnh Sửa Hồ Sơ Bác Sĩ
+            </h5>
+            <button
+              type="button"
+              class="btn-close"
+              data-bs-dismiss="modal"
+            ></button>
+          </div>
+          <form id="form-edit-doctor">
+            <div class="modal-body p-4">
+              <div class="row g-3">
+                <div class="col-md-6">
+                  <label class="form-label fw-bold"
+                    >Mã UID (Không được sửa)</label
+                  >
+                  <input
+                    type="text"
+                    id="edit-doc-uid"
+                    class="form-control bg-light"
+                    readonly
+                  />
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label fw-bold">Mã Số ID (Id)</label>
+                  <input
+                    type="number"
+                    id="edit-doc-id"
+                    class="form-control"
+                    required
+                  />
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label fw-bold">Họ và Tên Bác Sĩ</label>
+                  <input
+                    type="text"
+                    id="edit-doc-name"
+                    class="form-control"
+                    required
+                  />
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label fw-bold">Chuyên Khoa</label>
+                  <select id="edit-doc-special" class="form-select" required>
+                    <option value="">Đang tải...</option>
+                  </select>
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label fw-bold">Số Năm Kinh Nghiệm</label>
+                  <input
+                    type="number"
+                    id="edit-doc-experience"
+                    class="form-control"
+                    required
+                  />
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label fw-bold">Giá Khám (VNĐ)</label>
+                  <input
+                    type="text"
+                    id="edit-doc-price"
+                    class="form-control"
+                    required
+                  />
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label fw-bold">Số Điện Thoại</label>
+                  <input
+                    type="text"
+                    id="edit-doc-mobile"
+                    class="form-control"
+                    required
+                  />
+                </div>
+                <div class="col-12">
+                  <label class="form-label fw-bold"
+                    >Lịch Làm Việc (Schedule)</label
+                  >
+                  <input
+                    type="text"
+                    id="edit-doc-schedule"
+                    class="form-control"
+                    required
+                  />
+                </div>
+                <div class="col-12">
+                  <label class="form-label fw-bold"
+                    >Link Ảnh Thẻ (Picture URL)</label
+                  >
+                  <input
+                    type="url"
+                    id="edit-doc-picture"
+                    class="form-control"
+                  />
+                </div>
+              </div>
+            </div>
+            <div class="modal-footer bg-light">
+              <button
+                type="button"
+                class="btn btn-secondary"
+                data-bs-dismiss="modal"
+              >
+                Đóng
+              </button>
+              <button type="submit" class="btn btn-warning fw-bold">
+                <i class="fas fa-save me-1"></i>Cập nhật thông tin
               </button>
             </div>
           </form>

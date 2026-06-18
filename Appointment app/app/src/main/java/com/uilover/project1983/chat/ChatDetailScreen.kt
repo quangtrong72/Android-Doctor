@@ -62,10 +62,16 @@ fun ChatDetailScreen(
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
 
+    var showIncomingCallDialog by remember { mutableStateOf(false) }
+    var incomingCallRoomId by remember { mutableStateOf("") }
+    var incomingCallerId by remember { mutableStateOf("") }
+    var showLocalVideoCall by remember { mutableStateOf(false) }
+
     val roomId = remember(currentUserId, receiverId) {
         if (currentUserId < receiverId) "${currentUserId}_$receiverId" else "${receiverId}_$currentUserId"
     }
 
+    // Bộ lắng nghe đọc và cập nhật trạng thái tin nhắn
     DisposableEffect(roomId) {
         if (currentUserId.isEmpty() || receiverId.isEmpty()) return@DisposableEffect onDispose {}
 
@@ -73,10 +79,7 @@ fun ChatDetailScreen(
         val listener = db.collection("Chats").document(roomId).collection("Messages")
             .orderBy("timestamp", Query.Direction.ASCENDING)
             .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    android.util.Log.e("ChatError", "Lỗi đọc tin nhắn: ${error.message}")
-                    return@addSnapshotListener
-                }
+                if (error != null) return@addSnapshotListener
 
                 if (snapshot != null) {
                     val loadedMessages = snapshot.documents.mapNotNull { doc ->
@@ -94,6 +97,15 @@ fun ChatDetailScreen(
                     }
                     messages = loadedMessages
 
+                    // 🔴 ĐÃ FIX LỖI MẤT IN ĐẬM:
+                    // Chỉ cập nhật thành "Đã đọc" (isRead = true) khi tin nhắn cuối cùng trong phòng là do ĐỐI PHƯƠNG gửi đến cho mình
+                    if (loadedMessages.isNotEmpty()) {
+                        val lastMessage = loadedMessages.last()
+                        if (!lastMessage.isFromMe) {
+                            db.collection("Chats").document(roomId).update("isRead", true)
+                        }
+                    }
+
                     coroutineScope.launch {
                         if (messages.isNotEmpty()) {
                             listState.animateScrollToItem(messages.size - 1)
@@ -102,6 +114,29 @@ fun ChatDetailScreen(
                 }
             }
         onDispose { listener.remove() }
+    }
+
+    DisposableEffect(currentUserId) {
+        if (currentUserId.isEmpty()) return@DisposableEffect onDispose {}
+        val db = FirebaseFirestore.getInstance()
+
+        val callListener = db.collection("Calls")
+            .whereEqualTo("receiverId", currentUserId)
+            .whereEqualTo("status", "calling")
+            .addSnapshotListener { snapshot, error ->
+                if (error == null && snapshot != null && !snapshot.isEmpty) {
+                    val doc = snapshot.documents.first()
+                    val callerId = doc.getString("callerId") ?: ""
+                    if (callerId == receiverId) {
+                        incomingCallerId = callerId
+                        incomingCallRoomId = doc.id
+                        showIncomingCallDialog = true
+                    }
+                } else {
+                    showIncomingCallDialog = false
+                }
+            }
+        onDispose { callListener.remove() }
     }
 
     fun sendMessageToFirestore(text: String) {
@@ -119,76 +154,104 @@ fun ChatDetailScreen(
         db.collection("Chats").document(roomId).collection("Messages").add(msgData)
             .addOnFailureListener { e -> Toast.makeText(context, "Gửi thất bại: ${e.message}", Toast.LENGTH_LONG).show() }
 
+        // Gửi tin nhắn mới đặt mặc định phòng chat là chưa đọc (isRead = false)
         val roomData = hashMapOf(
             "participants" to listOf(currentUserId, receiverId),
             "lastMessage" to text.trim(),
             "timestamp" to timestamp,
-            "lastSenderId" to currentUserId
+            "lastSenderId" to currentUserId,
+            "isRead" to false
         )
         db.collection("Chats").document(roomId).set(roomData, SetOptions.merge())
 
         messageText = ""
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier.size(42.dp).clip(CircleShape).background(Color(0xFFE0E0E0)),
-                            contentAlignment = Alignment.Center
-                        ) { Icon(Icons.Default.Person, contentDescription = null, tint = Color.Gray) }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(contactName, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color.Black)
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color(0xFF4CAF50)))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Online", fontSize = 12.sp, color = TextGray)
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier.size(42.dp).clip(CircleShape).background(Color(0xFFE0E0E0)),
+                                contentAlignment = Alignment.Center
+                            ) { Icon(Icons.Default.Person, contentDescription = null, tint = Color.Gray) }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(contactName, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color(0xFF4CAF50)))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Online", fontSize = 12.sp, color = TextGray)
+                                }
                             }
                         }
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) { Icon(Icons.Default.ArrowBack, contentDescription = "Quay lại", tint = Color.Black) }
-                },
-                actions = {
-                    // Khi người dùng bấm gọi Video ở đây, thông tin sẽ được truyền ra ngoài màn hình Main
-                    // để hiển thị đè lên toàn bộ app.
-                    IconButton(onClick = onVideoCallClick) { Icon(Icons.Rounded.Videocam, contentDescription = "Gọi Video", tint = Color.Black) }
-                    IconButton(onClick = { /* Gọi thoại */ }) { Icon(Icons.Rounded.Call, contentDescription = "Gọi thoại", tint = Color.Black) }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = BgColor)
-            )
-        },
-        bottomBar = {
-            Row(modifier = Modifier.fillMaxWidth().background(BgColor).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextField(
-                    value = messageText, onValueChange = { messageText = it },
-                    modifier = Modifier.weight(1f).shadow(4.dp, RoundedCornerShape(30.dp)),
-                    placeholder = { Text("Type messages...", fontSize = 14.sp, color = Color.Gray) },
-                    colors = TextFieldDefaults.colors(focusedContainerColor = Color.White, unfocusedContainerColor = Color.White, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, cursorColor = Color(0xFF66BB6A)),
-                    shape = RoundedCornerShape(30.dp)
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBackClick) { Icon(Icons.Default.ArrowBack, contentDescription = "Quay lại", tint = Color.Black) }
+                    },
+                    actions = {
+                        IconButton(onClick = onVideoCallClick) { Icon(Icons.Rounded.Videocam, contentDescription = "Gọi Video", tint = Color.Black) }
+                        IconButton(onClick = { /* Gọi thoại */ }) { Icon(Icons.Rounded.Call, contentDescription = "Gọi thoại", tint = Color.Black) }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = BgColor)
                 )
-                Spacer(modifier = Modifier.width(12.dp))
-                Box(modifier = Modifier.size(40.dp).clip(CircleShape).background(Color.White).shadow(2.dp, CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Outlined.Mic, contentDescription = "Mic", tint = Color.Black, modifier = Modifier.size(24.dp)) }
-                Spacer(modifier = Modifier.width(8.dp))
-                Box(
-                    modifier = Modifier.size(45.dp).clip(CircleShape).background(if (messageText.isNotBlank()) GradientSend else Brush.linearGradient(listOf(Color.Gray, Color.LightGray)))
-                        .clickable(enabled = messageText.isNotBlank(), onClick = { sendMessageToFirestore(messageText) }),
-                    contentAlignment = Alignment.Center
-                ) { Icon(Icons.Default.Send, contentDescription = "Send", tint = Color.White, modifier = Modifier.size(20.dp).padding(start = 2.dp)) }
+            },
+            bottomBar = {
+                Row(modifier = Modifier.fillMaxWidth().background(BgColor).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TextField(
+                        value = messageText, onValueChange = { messageText = it },
+                        modifier = Modifier.weight(1f).shadow(4.dp, RoundedCornerShape(30.dp)),
+                        placeholder = { Text("Type messages...", fontSize = 14.sp, color = Color.Gray) },
+                        colors = TextFieldDefaults.colors(focusedContainerColor = Color.White, unfocusedContainerColor = Color.White, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, cursorColor = Color(0xFF66BB6A)),
+                        shape = RoundedCornerShape(30.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Box(modifier = Modifier.size(40.dp).clip(CircleShape).background(Color.White).shadow(2.dp, CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Outlined.Mic, contentDescription = "Mic", tint = Color.Black, modifier = Modifier.size(24.dp)) }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier.size(45.dp).clip(CircleShape).background(if (messageText.isNotBlank()) GradientSend else Brush.linearGradient(listOf(Color.Gray, Color.LightGray)))
+                            .clickable(enabled = messageText.isNotBlank(), onClick = { sendMessageToFirestore(messageText) }),
+                        contentAlignment = Alignment.Center
+                    ) { Icon(Icons.Default.Send, contentDescription = "Send", tint = Color.White, modifier = Modifier.size(20.dp).padding(start = 2.dp)) }
+                }
+            },
+            containerColor = BgColor
+        ) { paddingValues ->
+            LazyColumn(
+                state = listState, modifier = Modifier.fillMaxSize().padding(paddingValues).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                item { Spacer(modifier = Modifier.height(8.dp)) }
+                items(messages) { msg -> ChatBubble(message = msg) }
+                item { Spacer(modifier = Modifier.height(16.dp)) }
             }
-        },
-        containerColor = BgColor
-    ) { paddingValues ->
-        LazyColumn(
-            state = listState, modifier = Modifier.fillMaxSize().padding(paddingValues).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            item { Spacer(modifier = Modifier.height(8.dp)) }
-            items(messages) { msg -> ChatBubble(message = msg) }
-            item { Spacer(modifier = Modifier.height(16.dp)) }
+        }
+
+        if (showIncomingCallDialog) {
+            AlertDialog(
+                onDismissRequest = { },
+                title = { Text(text = "Cuộc gọi Video 📞", fontWeight = FontWeight.Bold) },
+                text = { Text(text = "$contactName đang gọi cho bạn. Bạn có muốn nghe máy không?") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val db = FirebaseFirestore.getInstance()
+                            db.collection("Calls").document(incomingCallRoomId).update("status", "answered")
+                            showIncomingCallDialog = false
+                            showLocalVideoCall = true
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
+                    ) { Text("Nghe máy") }
+                },
+                dismissButton = {
+                    OutlinedButton(onClick = { FirebaseFirestore.getInstance().collection("Calls").document(incomingCallRoomId).update("status", "rejected"); showIncomingCallDialog = false }) { Text("Từ chối", color = Color.Red) }
+                }
+            )
+        }
+
+        if (showLocalVideoCall) {
+            VideoCallScreen(contactName = contactName, receiverId = incomingCallerId, onEndCall = { showLocalVideoCall = false })
         }
     }
 }

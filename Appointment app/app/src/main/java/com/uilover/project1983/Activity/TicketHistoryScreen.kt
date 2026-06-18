@@ -1,5 +1,6 @@
 package com.uilover.project1983.Activity
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -21,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -58,36 +60,41 @@ fun TicketHistoryScreen(onBackClick: () -> Unit = {}) {
     var selectedTabIndex by remember { mutableIntStateOf(0) }
     val tabs = listOf("Tất cả", "Đợi xác nhận", "Lịch khám", "Đã khám", "Đã hủy")
 
-    // Gọi dữ liệu từ Cloud Firestore
+    // Gọi dữ liệu từ Cloud Firestore (Có Lắng nghe Realtime)
     LaunchedEffect(Unit) {
         val uid = FirebaseAuth.getInstance().currentUser?.uid
         if (uid != null) {
             val db = FirebaseFirestore.getInstance()
+
+            // Dùng addSnapshotListener để giao diện tự cập nhật khi bệnh nhân hủy lịch
             db.collection("Appointments")
                 .whereEqualTo("userId", uid)
-                .get()
-                .addOnSuccessListener { querySnapshot ->
-                    val list = mutableListOf<AppointmentModel>()
-                    for (doc in querySnapshot.documents) {
-                        list.add(
-                            AppointmentModel(
-                                id = doc.id,
-                                doctorName = doc.getString("doctorName") ?: "",
-                                specialty = doc.getString("specialty") ?: "",
-                                serviceName = doc.getString("serviceName") ?: "",
-                                date = doc.getString("date") ?: "",
-                                time = doc.getString("time") ?: "",
-                                patientName = doc.getString("patientName") ?: "",
-                                totalAmount = doc.getLong("totalAmount")?.toInt() ?: 0,
-                                status = doc.getString("status") ?: "Chưa xác định"
-                            )
-                        )
+                .addSnapshotListener { querySnapshot, error ->
+                    if (error != null) {
+                        isLoading = false
+                        return@addSnapshotListener
                     }
-                    appointments = list.reversed()
-                    isLoading = false
-                }
-                .addOnFailureListener {
-                    isLoading = false
+
+                    if (querySnapshot != null) {
+                        val list = mutableListOf<AppointmentModel>()
+                        for (doc in querySnapshot.documents) {
+                            list.add(
+                                AppointmentModel(
+                                    id = doc.id,
+                                    doctorName = doc.getString("doctorName") ?: "",
+                                    specialty = doc.getString("specialty") ?: "",
+                                    serviceName = doc.getString("serviceName") ?: "",
+                                    date = doc.getString("date") ?: "",
+                                    time = doc.getString("time") ?: "",
+                                    patientName = doc.getString("patientName") ?: "",
+                                    totalAmount = doc.getLong("totalAmount")?.toInt() ?: 0,
+                                    status = doc.getString("status") ?: "Chưa xác định"
+                                )
+                            )
+                        }
+                        appointments = list.reversed()
+                        isLoading = false
+                    }
                 }
         } else {
             isLoading = false
@@ -97,7 +104,8 @@ fun TicketHistoryScreen(onBackClick: () -> Unit = {}) {
     // --- LỌC DỮ LIỆU ---
     val filteredAppointments = when (selectedTabIndex) {
         0 -> appointments
-        1 -> appointments.filter { it.status == "Đã thanh toán" }
+        // Tab đợi xác nhận hiện cả phiếu chưa thanh toán và đã thanh toán chờ duyệt
+        1 -> appointments.filter { it.status == "Đã thanh toán" || it.status == "Chưa thanh toán" }
         2 -> appointments.filter { it.status == "Đã xác nhận" }
         3 -> appointments.filter { it.status == "Đã khám" }
         4 -> appointments.filter { it.status == "Đã hủy" }
@@ -178,7 +186,6 @@ fun TicketHistoryScreen(onBackClick: () -> Unit = {}) {
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         items(filteredAppointments) { appointment ->
-                            // Truyền sự kiện bấm vào thẻ để mở Dialog
                             TicketHistoryItem(appointment, onClick = {
                                 selectedAppointment = appointment
                             })
@@ -203,7 +210,9 @@ fun TicketHistoryScreen(onBackClick: () -> Unit = {}) {
 fun TicketHistoryItem(appointment: AppointmentModel, onClick: () -> Unit) {
     val BluePrimary = Color(0xFF1E88E5)
 
+    // Quy định màu sắc và text hiển thị
     val (displayStatus, badgeColor) = when (appointment.status) {
+        "Chưa thanh toán" -> "Chờ thanh toán" to Color(0xFFFF9800)
         "Đã thanh toán" -> "Đợi xác nhận" to Color(0xFFFF9800)
         "Đã xác nhận" -> "Đã xác nhận" to Color(0xFF4CAF50)
         "Đã khám" -> "Đã khám" to Color(0xFF2196F3)
@@ -220,7 +229,6 @@ fun TicketHistoryItem(appointment: AppointmentModel, onClick: () -> Unit) {
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // Header: Mã phiếu & Cụm Trạng thái song song
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -234,36 +242,23 @@ fun TicketHistoryItem(appointment: AppointmentModel, onClick: () -> Unit) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (appointment.status == "Đã thanh toán") {
                         Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFF4CAF50).copy(alpha = 0.15f))
-                                .padding(horizontal = 8.dp, vertical = 6.dp)
-                        ) {
-                            Text("Đã thanh toán", color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                        }
+                            modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFF4CAF50).copy(alpha = 0.15f)).padding(horizontal = 8.dp, vertical = 6.dp)
+                        ) { Text("Đã thanh toán", color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold, fontSize = 11.sp) }
                     }
 
                     Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(badgeColor.copy(alpha = 0.15f))
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
-                        Text(displayStatus, color = badgeColor, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                    }
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(badgeColor.copy(alpha = 0.15f)).padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) { Text(displayStatus, color = badgeColor, fontWeight = FontWeight.Bold, fontSize = 12.sp) }
                 }
             }
 
             Divider(modifier = Modifier.padding(vertical = 12.dp), color = Color.LightGray.copy(alpha = 0.3f), thickness = 1.dp)
 
-            // Body: Thông tin Bác sĩ & Bệnh nhân
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier.size(48.dp).clip(CircleShape).background(Color(0xFFE3F2FD)),
                     contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Default.MedicalServices, contentDescription = null, tint = BluePrimary)
-                }
+                ) { Icon(Icons.Default.MedicalServices, contentDescription = null, tint = BluePrimary) }
                 Spacer(modifier = Modifier.width(16.dp))
                 Column {
                     Text(text = appointment.doctorName, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF1A237E))
@@ -289,7 +284,6 @@ fun TicketHistoryItem(appointment: AppointmentModel, onClick: () -> Unit) {
 
             Divider(modifier = Modifier.padding(vertical = 12.dp), color = Color.LightGray.copy(alpha = 0.3f), thickness = 1.dp)
 
-            // Footer: Dịch vụ & Giá tiền
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text(text = appointment.serviceName, color = Color.Gray, fontSize = 14.sp, modifier = Modifier.weight(1f))
                 Text(text = "%,d đ".format(appointment.totalAmount), fontWeight = FontWeight.Bold, color = BluePrimary, fontSize = 16.sp)
@@ -298,14 +292,48 @@ fun TicketHistoryItem(appointment: AppointmentModel, onClick: () -> Unit) {
     }
 }
 
-// Hộp thoại hiển thị chi tiết phiếu khám
+// 🔴 ĐÃ CẬP NHẬT: Thêm nút "Hủy lịch" nếu trạng thái chưa được bác sĩ xác nhận
 @Composable
 fun TicketDetailDialog(appointment: AppointmentModel, onDismiss: () -> Unit) {
     val BluePrimary = Color(0xFF1E88E5)
+    val context = LocalContext.current
 
     val displayStatus = when (appointment.status) {
-        "Đã thanh toán" -> "Đợi xác nhận"
+        "Chưa thanh toán" -> "Chờ thanh toán"
+        "Đã thanh toán" -> "Đợi bác sĩ duyệt"
         else -> appointment.status
+    }
+
+    // Điều kiện cho phép hủy: Bác sĩ chưa khám, chưa xác nhận và chưa hủy
+    val canCancel = appointment.status == "Chưa thanh toán" || appointment.status == "Đã thanh toán"
+
+    var showCancelConfirmDialog by remember { mutableStateOf(false) }
+
+    // Hộp thoại xác nhận hủy kép
+    if (showCancelConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showCancelConfirmDialog = false },
+            title = { Text("Xác nhận hủy lịch", fontWeight = FontWeight.Bold) },
+            text = { Text("Bạn có chắc chắn muốn hủy lịch khám này không? Hành động này không thể hoàn tác.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val db = FirebaseFirestore.getInstance()
+                        db.collection("Appointments").document(appointment.id)
+                            .update("status", "Đã hủy")
+                            .addOnSuccessListener {
+                                Toast.makeText(context, "Hủy lịch thành công", Toast.LENGTH_SHORT).show()
+                                showCancelConfirmDialog = false
+                                onDismiss() // Đóng dialog chi tiết
+                            }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                ) { Text("Hủy Lịch") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showCancelConfirmDialog = false }) { Text("Đóng") }
+            }
+        )
     }
 
     Dialog(onDismissRequest = onDismiss) {
@@ -318,7 +346,6 @@ fun TicketDetailDialog(appointment: AppointmentModel, onDismiss: () -> Unit) {
                 modifier = Modifier.padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Nút đóng góc trên
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
                         Icon(Icons.Default.Close, contentDescription = "Đóng", tint = Color.Gray)
@@ -328,7 +355,6 @@ fun TicketDetailDialog(appointment: AppointmentModel, onDismiss: () -> Unit) {
                 Text("CHI TIẾT PHIẾU KHÁM", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = BluePrimary)
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Mã vạch giả lập cho chuyên nghiệp
                 Box(modifier = Modifier.fillMaxWidth().height(50.dp).background(Color(0xFFEEEEEE)), contentAlignment = Alignment.Center) {
                     Text("|||| | |||||| || | ||||", fontSize = 28.sp, letterSpacing = 4.sp, color = Color.Black)
                 }
@@ -336,19 +362,12 @@ fun TicketDetailDialog(appointment: AppointmentModel, onDismiss: () -> Unit) {
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Trạng thái
                 Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(BluePrimary.copy(alpha = 0.1f))
-                        .padding(horizontal = 16.dp, vertical = 6.dp)
-                ) {
-                    Text("Trạng thái: $displayStatus", color = BluePrimary, fontWeight = FontWeight.Bold)
-                }
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(BluePrimary.copy(alpha = 0.1f)).padding(horizontal = 16.dp, vertical = 6.dp)
+                ) { Text("Trạng thái: $displayStatus", color = BluePrimary, fontWeight = FontWeight.Bold) }
 
                 Divider(modifier = Modifier.padding(vertical = 16.dp), color = Color.LightGray.copy(alpha = 0.5f))
 
-                // 🔴 BẢNG THÔNG TIN CHI TIẾT (Đã đổi tên hàm thành TicketInfoRow)
                 TicketInfoRow("Bác sĩ:", appointment.doctorName)
                 TicketInfoRow("Chuyên khoa:", appointment.specialty)
                 TicketInfoRow("Bệnh nhân:", appointment.patientName.split(" - ")[0])
@@ -365,20 +384,39 @@ fun TicketDetailDialog(appointment: AppointmentModel, onDismiss: () -> Unit) {
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                Button(
-                    onClick = onDismiss,
-                    modifier = Modifier.fillMaxWidth().height(48.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = BluePrimary),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text("Đóng", fontWeight = FontWeight.Bold)
+                // 🔴 KHU VỰC NÚT BẤM (Nếu được hủy thì hiện 2 nút)
+                if (canCancel) {
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick = { showCancelConfirmDialog = true },
+                            modifier = Modifier.weight(1f).height(48.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red),
+                            border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(Color.Red.copy(alpha = 0.5f)))
+                        ) { Text("Hủy Lịch", fontWeight = FontWeight.Bold) }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Button(
+                            onClick = onDismiss,
+                            modifier = Modifier.weight(1f).height(48.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = BluePrimary),
+                            shape = RoundedCornerShape(12.dp)
+                        ) { Text("Đóng", fontWeight = FontWeight.Bold) }
+                    }
+                } else {
+                    Button(
+                        onClick = onDismiss,
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = BluePrimary),
+                        shape = RoundedCornerShape(12.dp)
+                    ) { Text("Đóng", fontWeight = FontWeight.Bold) }
                 }
             }
         }
     }
 }
 
-// 🔴 ĐÃ ĐỔI TÊN HÀM: Tránh trùng lặp với file khác trong project
 @Composable
 fun TicketInfoRow(label: String, value: String) {
     Row(
