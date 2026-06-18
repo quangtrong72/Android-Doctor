@@ -122,6 +122,11 @@ fun DoctorMainScreen() {
     var chatContactName by remember { mutableStateOf("") }
     var chatReceiverId by remember { mutableStateOf("") }
 
+    // 🔴 1. CÁC BIẾN QUẢN LÝ HỘP THOẠI CUỘC GỌI
+    var showIncomingCallDialog by remember { mutableStateOf(false) }
+    var incomingCallRoomId by remember { mutableStateOf("") }
+    var incomingCallerId by remember { mutableStateOf("") }
+
     var doctorName by remember { mutableStateOf("Đang tải...") }
     var doctorAvatar by remember { mutableStateOf("") }
     var doctorIsActive by remember { mutableStateOf(false) }
@@ -132,7 +137,6 @@ fun DoctorMainScreen() {
     var appointments by remember { mutableStateOf<List<AppointmentModel>>(emptyList()) }
     var isLoadingChats by remember { mutableStateOf(true) }
 
-    // 🔴 ĐÃ FIX: getReference("Doctors")
     LaunchedEffect(currentDoctorId) {
         if (currentDoctorId.isNotEmpty()) {
             val rtdb = com.google.firebase.database.FirebaseDatabase.getInstance().getReference("Doctors").child(currentDoctorId)
@@ -205,58 +209,110 @@ fun DoctorMainScreen() {
         onDispose { listener.remove() }
     }
 
+    // 🔴 2. LẮNG NGHE CUỘC GỌI TOÀN CỤC (GLOBAL LISTENER)
     DisposableEffect(currentDoctorId) {
         if (currentDoctorId.isEmpty()) return@DisposableEffect onDispose {}
         val callListener = db.collection("Calls").whereEqualTo("receiverId", currentDoctorId).whereEqualTo("status", "calling")
             .addSnapshotListener { snapshot, error ->
                 if (error == null && snapshot != null && !snapshot.isEmpty) {
                     val doc = snapshot.documents.first()
-                    chatReceiverId = doc.getString("callerId") ?: ""
+                    incomingCallerId = doc.getString("callerId") ?: ""
+                    incomingCallRoomId = doc.id
                     chatContactName = "Bệnh nhân đang gọi..."
-                    showVideoCall = true
+
+                    // Bật hộp thoại hỏi ý kiến, chưa bật Camera vội
+                    showIncomingCallDialog = true
+                } else {
+                    // Tự động tắt hộp thoại nếu bên kia dập máy trước
+                    showIncomingCallDialog = false
                 }
             }
         onDispose { callListener.remove() }
     }
 
-    if (showVideoCall) {
-        VideoCallScreen(contactName = chatContactName, receiverId = chatReceiverId, onEndCall = { showVideoCall = false })
-    } else if (showChatDetail) {
-        ChatDetailScreen(contactName = chatContactName, receiverId = chatReceiverId, onBackClick = { showChatDetail = false }, onVideoCallClick = { showVideoCall = true })
-    } else {
-        Scaffold(
-            bottomBar = { DoctorBottomNav(selectedItem) { index -> selectedItem = index } }
-        ) { paddingValues ->
-            Box(modifier = Modifier.padding(paddingValues)) {
-                when (selectedItem) {
-                    0 -> DoctorDashboardContent(
-                        doctorId = currentDoctorId,
-                        doctorName = doctorName,
-                        doctorAvatar = doctorAvatar,
-                        isActive = doctorIsActive,
-                        workingHours = doctorWorkingHours,
-                        notifications = notifications,
-                        appointments = appointments,
-                        recentChats = chatHistory.take(3),
-                        onChatClick = { patientName, patientUid, roomId ->
-                            if (roomId.isNotEmpty()) db.collection("Chats").document(roomId).update("isRead", true)
-                            chatContactName = patientName; chatReceiverId = patientUid; showChatDetail = true
-                        }
-                    )
-                    1 -> DoctorScheduleScreen() // Màn hình ở tab 2
-                    2 -> DoctorProfileScreen(onBack = { selectedItem = 0 })
-                    3 -> Box(modifier = Modifier.fillMaxSize()) {
-                        DoctorChatListScreen(
-                            chatList = chatHistory, isLoading = isLoadingChats,
-                            onChatClick = { name, uid, roomId ->
+    // 🔴 3. DÙNG BOX ĐỂ XẾP LỚP GIAO DIỆN (HỘP THOẠI LUÔN NỔI LÊN TRÊN CÙNG)
+    Box(modifier = Modifier.fillMaxSize()) {
+
+        // LỚP NỀN: CÁC MÀN HÌNH BÌNH THƯỜNG
+        if (showVideoCall) {
+            VideoCallScreen(contactName = chatContactName, receiverId = chatReceiverId, onEndCall = { showVideoCall = false })
+        } else if (showChatDetail) {
+            ChatDetailScreen(contactName = chatContactName, receiverId = chatReceiverId, onBackClick = { showChatDetail = false }, onVideoCallClick = { showVideoCall = true })
+        } else {
+            Scaffold(
+                bottomBar = { DoctorBottomNav(selectedItem) { index -> selectedItem = index } }
+            ) { paddingValues ->
+                Box(modifier = Modifier.padding(paddingValues)) {
+                    when (selectedItem) {
+                        0 -> DoctorDashboardContent(
+                            doctorId = currentDoctorId,
+                            doctorName = doctorName,
+                            doctorAvatar = doctorAvatar,
+                            isActive = doctorIsActive,
+                            workingHours = doctorWorkingHours,
+                            notifications = notifications,
+                            appointments = appointments,
+                            recentChats = chatHistory.take(3),
+                            onChatClick = { patientName, patientUid, roomId ->
                                 if (roomId.isNotEmpty()) db.collection("Chats").document(roomId).update("isRead", true)
-                                chatContactName = name; chatReceiverId = uid; showChatDetail = true
+                                chatContactName = patientName; chatReceiverId = patientUid; showChatDetail = true
                             }
                         )
+                        1 -> DoctorScheduleScreen()
+                        2 -> DoctorProfileScreen(onBack = { selectedItem = 0 })
+                        3 -> Box(modifier = Modifier.fillMaxSize()) {
+                            DoctorChatListScreen(
+                                chatList = chatHistory, isLoading = isLoadingChats,
+                                onChatClick = { name, uid, roomId ->
+                                    if (roomId.isNotEmpty()) db.collection("Chats").document(roomId).update("isRead", true)
+                                    chatContactName = name; chatReceiverId = uid; showChatDetail = true
+                                }
+                            )
+                        }
+                        4 -> Box(modifier = Modifier.fillMaxSize()) { DoctorAccountScreen() }
                     }
-                    4 -> Box(modifier = Modifier.fillMaxSize()) { DoctorAccountScreen() }
                 }
             }
+        }
+
+        // 🔴 LỚP NỔI: HỘP THOẠI ĐỒNG Ý / TỪ CHỐI CUỘC GỌI
+        if (showIncomingCallDialog) {
+            AlertDialog(
+                onDismissRequest = { /* Ngăn chặn người dùng bấm ra ngoài để tắt hộp thoại */ },
+                title = {
+                    Text(text = "Cuộc gọi đến 📞", fontWeight = FontWeight.Bold)
+                },
+                text = {
+                    Text(text = "Bạn có một cuộc gọi Video từ $chatContactName. Bạn có muốn nhận cuộc gọi này không?")
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            // 1. Cập nhật trạng thái "answered" lên Firebase
+                            db.collection("Calls").document(incomingCallRoomId).update("status", "answered")
+
+                            // 2. Tắt hộp thoại và Bật màn hình Video
+                            chatReceiverId = incomingCallerId
+                            showIncomingCallDialog = false
+                            showVideoCall = true
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = StatusGreen)
+                    ) {
+                        Text("Đồng ý")
+                    }
+                },
+                dismissButton = {
+                    OutlinedButton(
+                        onClick = {
+                            // Từ chối cuộc gọi -> Cập nhật Firebase là "rejected"
+                            db.collection("Calls").document(incomingCallRoomId).update("status", "rejected")
+                            showIncomingCallDialog = false
+                        }
+                    ) {
+                        Text("Từ chối", color = Color.Red)
+                    }
+                }
+            )
         }
     }
 }
@@ -274,7 +330,6 @@ fun DoctorDashboardContent(
     recentChats: List<ChatRoom>,
     onChatClick: (String, String, String) -> Unit
 ) {
-    // 🔴 ĐÃ FIX: getReference("Doctors")
     val rtdb = com.google.firebase.database.FirebaseDatabase.getInstance().getReference("Doctors").child(doctorId)
     var showEditDialog by remember { mutableStateOf(false) }
     var inputHours by remember { mutableStateOf(workingHours) }
