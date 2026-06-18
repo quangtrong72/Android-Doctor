@@ -1,0 +1,306 @@
+package com.uilover.project1983.Chat
+
+import android.widget.Toast
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.rounded.Call
+import androidx.compose.material.icons.rounded.Videocam
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.SetOptions
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.*
+
+// --- THEME COLORS (Bảng màu giao diện mới theo ảnh mẫu) ---
+val BgColor = Color(0xFFF4F7F9)           // Nền xám nhạt (Light Gray Background)
+val SentBubbleColor = Color(0xFF212529)   // Đen nhám (Dark Gray/Black)
+val ReceivedBubbleColor = Color.White     // Trắng (White)
+val TextGray = Color(0xFF888888)          // Xám chữ (Gray Text)
+// Hiệu ứng Gradient Vàng - Xanh cho nút Send
+val GradientSend = Brush.linearGradient(listOf(Color(0xFFD4E157), Color(0xFF66BB6A)))
+
+// Model tin nhắn dùng cho giao diện
+data class MessageModel(
+    val id: String = "",
+    val text: String = "",
+    val isFromMe: Boolean = false,
+    val time: String = ""
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ChatDetailScreen(
+    contactName: String = "Người dùng",
+    receiverId: String,
+    onBackClick: () -> Unit,
+    onVideoCallClick: () -> Unit
+) {
+    val context = LocalContext.current
+    val currentUserId = FirebaseAuth.getInstance().currentUser?.uid ?: ""
+    var messageText by remember { mutableStateOf("") }
+    var messages by remember { mutableStateOf<List<MessageModel>>(emptyList()) }
+    val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+
+    val roomId = remember(currentUserId, receiverId) {
+        if (currentUserId < receiverId) "${currentUserId}_$receiverId" else "${receiverId}_$currentUserId"
+    }
+
+    // Real-time Database Listener (Bộ lắng nghe cơ sở dữ liệu thời gian thực)
+    DisposableEffect(roomId) {
+        if (currentUserId.isEmpty() || receiverId.isEmpty()) return@DisposableEffect onDispose {}
+
+        val db = FirebaseFirestore.getInstance()
+        val listener = db.collection("Chats").document(roomId).collection("Messages")
+            .orderBy("timestamp", Query.Direction.ASCENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    android.util.Log.e("ChatError", "Lỗi đọc tin nhắn: ${error.message}")
+                    return@addSnapshotListener
+                }
+
+                if (snapshot != null) {
+                    val loadedMessages = snapshot.documents.mapNotNull { doc ->
+                        val text = doc.getString("text") ?: ""
+                        val senderId = doc.getString("senderId") ?: ""
+                        val timestamp = doc.getLong("timestamp") ?: 0L
+                        val timeString = SimpleDateFormat("HH:mm a", Locale.getDefault()).format(Date(timestamp))
+
+                        MessageModel(
+                            id = doc.id,
+                            text = text,
+                            isFromMe = senderId == currentUserId,
+                            time = timeString
+                        )
+                    }
+                    messages = loadedMessages
+
+                    coroutineScope.launch {
+                        if (messages.isNotEmpty()) {
+                            listState.animateScrollToItem(messages.size - 1)
+                        }
+                    }
+                }
+            }
+        onDispose { listener.remove() }
+    }
+
+    // 🔴 HÀM GỬI TIN NHẮN ĐÃ ĐƯỢC FIX LOGIC LƯU VẾT PHÒNG CHAT
+    fun sendMessageToFirestore(text: String) {
+        if (currentUserId.isEmpty()) {
+            Toast.makeText(context, "Lỗi: Bạn chưa đăng nhập!", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (receiverId.isEmpty()) {
+            Toast.makeText(context, "Lỗi: Không tìm thấy ID đối phương!", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (text.isBlank()) return
+
+        val db = FirebaseFirestore.getInstance()
+        val timestamp = System.currentTimeMillis()
+
+        // 1. Ghi tin nhắn chi tiết vào Sub-collection
+        val msgData = hashMapOf(
+            "text" to text.trim(),
+            "senderId" to currentUserId,
+            "receiverId" to receiverId,
+            "timestamp" to timestamp
+        )
+
+        db.collection("Chats").document(roomId).collection("Messages").add(msgData)
+            .addOnFailureListener { e ->
+                Toast.makeText(context, "Gửi thất bại: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+
+        // 2. 🔴 QUAN TRỌNG: Ghi thông tin phòng chat ra ngoài để Danh sách (Inbox) thấy được
+        val roomData = hashMapOf(
+            "participants" to listOf(currentUserId, receiverId), // Mảng này giúp Firestore tìm kiếm dễ dàng
+            "lastMessage" to text.trim(),
+            "timestamp" to timestamp,
+            "lastSenderId" to currentUserId
+        )
+        // SetOptions.merge() giúp cập nhật thông tin phòng mà không xóa các dữ liệu cũ
+        db.collection("Chats").document(roomId).set(roomData, SetOptions.merge())
+
+        messageText = ""
+    }
+
+    Scaffold(
+        topBar = {
+            // Top Bar (Thanh tiêu đề trên cùng)
+            TopAppBar(
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier.size(42.dp).clip(CircleShape).background(Color(0xFFE0E0E0)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Person, contentDescription = null, tint = Color.Gray)
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(contactName, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color(0xFF4CAF50)))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Online", fontSize = 12.sp, color = TextGray)
+                            }
+                        }
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBackClick) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Quay lại", tint = Color.Black)
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onVideoCallClick) {
+                        Icon(Icons.Rounded.Videocam, contentDescription = "Gọi Video", tint = Color.Black)
+                    }
+                    IconButton(onClick = { /* Gọi điện thoại */ }) {
+                        Icon(Icons.Rounded.Call, contentDescription = "Gọi thoại", tint = Color.Black)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = BgColor)
+            )
+        },
+        bottomBar = {
+            // Bottom Input Bar (Thanh nhập liệu dưới đáy)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(BgColor)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Input Field
+                TextField(
+                    value = messageText,
+                    onValueChange = { messageText = it },
+                    modifier = Modifier
+                        .weight(1f)
+                        .shadow(4.dp, RoundedCornerShape(30.dp)), // Đổ bóng nhẹ cho viền
+                    placeholder = { Text("Type messages...", fontSize = 14.sp, color = Color.Gray) },
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color.White,
+                        unfocusedContainerColor = Color.White,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        cursorColor = Color(0xFF66BB6A)
+                    ),
+                    shape = RoundedCornerShape(30.dp)
+                )
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                // Mic Icon (Voice Note)
+                Box(
+                    modifier = Modifier.size(40.dp).clip(CircleShape).background(Color.White).shadow(2.dp, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Outlined.Mic, contentDescription = "Mic", tint = Color.Black, modifier = Modifier.size(24.dp))
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                // Send Button with Gradient (Nút gửi có màu Gradient)
+                Box(
+                    modifier = Modifier
+                        .size(45.dp)
+                        .clip(CircleShape)
+                        .background(if (messageText.isNotBlank()) GradientSend else Brush.linearGradient(listOf(Color.Gray, Color.LightGray)))
+                        .clickable(
+                            enabled = messageText.isNotBlank(),
+                            onClick = { sendMessageToFirestore(messageText) }
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.Send, contentDescription = "Send", tint = Color.White, modifier = Modifier.size(20.dp).padding(start = 2.dp))
+                }
+            }
+        },
+        containerColor = BgColor
+    ) { paddingValues ->
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize().padding(paddingValues).padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item { Spacer(modifier = Modifier.height(8.dp)) }
+
+            items(messages) { msg ->
+                ChatBubble(message = msg)
+            }
+
+            item { Spacer(modifier = Modifier.height(16.dp)) }
+        }
+    }
+}
+
+// Custom Chat Bubble UI
+@Composable
+fun ChatBubble(message: MessageModel) {
+    val isMe = message.isFromMe
+    val alignment = if (isMe) Alignment.CenterEnd else Alignment.CenterStart
+    val bubbleColor = if (isMe) SentBubbleColor else ReceivedBubbleColor
+    val textColor = if (isMe) Color.White else Color.Black
+
+    // Bubble Shapes (Tạo độ bo góc đặc trưng: tin nhắn của ai thì mép dưới bên đó vuông vức)
+    val shape = if (isMe) {
+        RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 4.dp)
+    } else {
+        RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 4.dp, bottomEnd = 20.dp)
+    }
+
+    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = alignment) {
+        Column(horizontalAlignment = if (isMe) Alignment.End else Alignment.Start) {
+
+            // Text Box
+            Box(
+                modifier = Modifier
+                    .widthIn(max = 280.dp)
+                    .clip(shape)
+                    .background(bubbleColor)
+                    .padding(horizontal = 18.dp, vertical = 14.dp)
+            ) {
+                Text(text = message.text, color = textColor, fontSize = 15.sp, lineHeight = 22.sp)
+            }
+
+            // Time and Status (Giờ và trạng thái)
+            Row(
+                modifier = Modifier.padding(top = 6.dp, start = 4.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+                ) {
+                Text(text = message.time, fontSize = 11.sp, color = TextGray)
+                if (isMe) {
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(Icons.Default.DoneAll, contentDescription = "Đã đọc", tint = Color(0xFF64B5F6), modifier = Modifier.size(14.dp))
+                }
+            }
+        }
+    }
+}
