@@ -141,7 +141,7 @@ fun LoginScreen(
                 Text("🏥", fontSize = 56.sp)
                 Spacer(modifier = Modifier.height(10.dp))
                 Text(
-                    "Smart Doctor",
+                    "MediGo",
                     color = Color.White,
                     fontSize = 26.sp,
                     fontWeight = FontWeight.ExtraBold

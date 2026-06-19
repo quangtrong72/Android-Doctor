@@ -41,6 +41,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import coil.compose.AsyncImage
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.database.ValueEventListener
 import com.google.firebase.firestore.FirebaseFirestore
 import com.uilover.project1983.Domain.DoctorsModel
 import kotlinx.coroutines.delay
@@ -90,11 +94,32 @@ fun BookingScreen(doctor: DoctorsModel, onBack: () -> Unit) {
     var isSavingBooking by remember { mutableStateOf(false) }
     var generatedTicketId by remember { mutableStateOf("Đang khởi tạo...") }
 
+    // 🔴 1. KHAI BÁO BIẾN LƯU TRẠNG THÁI REALTIME CỦA BÁC SĨ
+    var doctorRealtimeStatus by remember { mutableStateOf(doctor.status) }
+
+    // 🔴 2. LẮNG NGHE SỰ THAY ĐỔI TRẠNG THÁI TỪ FIREBASE REALTIME DB
+    DisposableEffect(doctor.docUid) {
+        if (doctor.docUid.isNotEmpty()) {
+            val ref = FirebaseDatabase.getInstance().getReference("Doctors").child(doctor.docUid)
+            val listener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    val status = snapshot.child("status").getValue(String::class.java)
+                    if (status != null) doctorRealtimeStatus = status
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            }
+            ref.addValueEventListener(listener)
+            onDispose { ref.removeEventListener(listener) }
+        } else {
+            onDispose { }
+        }
+    }
+
     // --- Trạng thái Cổng thanh toán ---
     var showPaymentGateway by remember { mutableStateOf(false) }
     var tempBookingId by remember { mutableStateOf("") }
 
-    // 🔴 BIẾN TRẠNG THÁI MỚI: 0 là Chuyển khoản QR, 1 là Thanh toán trực tiếp
+    // 0 là Chuyển khoản QR, 1 là Thanh toán trực tiếp
     var selectedPaymentMethod by remember { mutableIntStateOf(0) }
     var finalTicketStatus by remember { mutableStateOf("Chưa thanh toán") }
 
@@ -188,18 +213,21 @@ fun BookingScreen(doctor: DoctorsModel, onBack: () -> Unit) {
         val uid = FirebaseAuth.getInstance().currentUser?.uid
         if (uid != null) {
             val db = FirebaseFirestore.getInstance()
-            db.collection("PatientProfiles").get().addOnSuccessListener { querySnapshot ->
-                val profiles = mutableListOf<PatientProfileModel>()
-                for (document in querySnapshot.documents) {
-                    val name = document.getString("fullName") ?: ""
-                    if (name.isNotEmpty()) {
-                        profiles.add(PatientProfileModel(document.id, name, document.getString("dob") ?: "", document.getString("phone") ?: ""))
+            db.collection("PatientProfiles")
+                .whereEqualTo("userId", uid)
+                .get()
+                .addOnSuccessListener { querySnapshot ->
+                    val profiles = mutableListOf<PatientProfileModel>()
+                    for (document in querySnapshot.documents) {
+                        val name = document.getString("fullName") ?: ""
+                        if (name.isNotEmpty()) {
+                            profiles.add(PatientProfileModel(document.id, name, document.getString("dob") ?: "", document.getString("phone") ?: ""))
+                        }
                     }
-                }
-                patientProfiles = profiles
-                if (profiles.isNotEmpty() && selectedProfile == null) selectedProfile = profiles[0]
-                isFetchingPatient = false
-            }.addOnFailureListener { isFetchingPatient = false }
+                    patientProfiles = profiles
+                    if (profiles.isNotEmpty() && selectedProfile == null) selectedProfile = profiles[0]
+                    isFetchingPatient = false
+                }.addOnFailureListener { isFetchingPatient = false }
         } else {
             isFetchingPatient = false
         }
@@ -212,7 +240,6 @@ fun BookingScreen(doctor: DoctorsModel, onBack: () -> Unit) {
     val discount = 2000
     val finalTotal = servicePrice + addonPrice + platformFee - discount
 
-    // Hàm đóng gói dữ liệu đẩy lên Firebase Firestore
     val saveBookingToFirebase: (String) -> Unit = { status ->
         isSavingBooking = true
         val db = FirebaseFirestore.getInstance()
@@ -232,6 +259,7 @@ fun BookingScreen(doctor: DoctorsModel, onBack: () -> Unit) {
             "time" to (selectedTime ?: ""),
             "totalAmount" to finalTotal,
             "status" to status,
+            "paymentMethod" to if (selectedPaymentMethod == 0) "Chuyển khoản QR" else "Tiền mặt",
             "createdAt" to com.google.firebase.Timestamp.now()
         )
 
@@ -250,7 +278,7 @@ fun BookingScreen(doctor: DoctorsModel, onBack: () -> Unit) {
                 db.collection("Notifications").add(notifData)
                 isSavingBooking = false
                 finalTicketStatus = status
-                currentStep = 5 // Chuyển màn hình xuất vé
+                currentStep = 5
             }
             .addOnFailureListener {
                 isSavingBooking = false
@@ -258,7 +286,6 @@ fun BookingScreen(doctor: DoctorsModel, onBack: () -> Unit) {
             }
     }
 
-    // --- MÀN HÌNH CỔNG THANH TOÁN QR ---
     if (showPaymentGateway) {
         PaymentGatewayScreen(
             amount = finalTotal,
@@ -291,31 +318,43 @@ fun BookingScreen(doctor: DoctorsModel, onBack: () -> Unit) {
         bottomBar = {
             if (currentStep < 5) {
                 Box(modifier = Modifier.fillMaxWidth().background(Color.White).padding(16.dp)) {
-                    Button(
-                        onClick = {
-                            when (currentStep) {
-                                1 -> if (selectedService != null && selectedDate != null && selectedTime != null) currentStep++
-                                2 -> if (selectedProfile != null) currentStep++
-                                3 -> currentStep++
-                                4 -> {
-                                    if (selectedPaymentMethod == 0) {
-                                        // Cách 1: Chuyển khoản QR -> Mở giao diện quét mã QR
-                                        tempBookingId = "BK" + System.currentTimeMillis().toString().takeLast(6)
-                                        showPaymentGateway = true
-                                    } else {
-                                        // Cách 2: Thanh toán trực tiếp -> Lưu trực tiếp với trạng thái "Chưa thanh toán"
-                                        saveBookingToFirebase("Chưa thanh toán")
+
+                    // 🔴 3. KIỂM TRA NẾU BÁC SĨ OFFLINE -> KHÓA NÚT NGAY LẬP TỨC TRONG QUÁ TRÌNH BOOKING
+                    if (doctorRealtimeStatus == "offline") {
+                        Button(
+                            onClick = { Toast.makeText(context, "Xin lỗi, bác sĩ vừa báo bận đột xuất và không nhận thêm lịch hôm nay.", Toast.LENGTH_LONG).show() },
+                            modifier = Modifier.fillMaxWidth().height(50.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.Gray),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Bác sĩ đang bận (Không nhận lịch)", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                    } else {
+                        // NẾU ONLINE -> HIỂN THỊ NÚT TIẾP TỤC / XÁC NHẬN BÌNH THƯỜNG
+                        Button(
+                            onClick = {
+                                when (currentStep) {
+                                    1 -> if (selectedService != null && selectedDate != null && selectedTime != null) currentStep++
+                                    2 -> if (selectedProfile != null) currentStep++
+                                    3 -> currentStep++
+                                    4 -> {
+                                        if (selectedPaymentMethod == 0) {
+                                            tempBookingId = "BK" + System.currentTimeMillis().toString().takeLast(6)
+                                            showPaymentGateway = true
+                                        } else {
+                                            saveBookingToFirebase("Chưa thanh toán")
+                                        }
                                     }
                                 }
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth().height(50.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = BluePrimary),
-                        shape = RoundedCornerShape(12.dp),
-                        enabled = !isSavingBooking
-                    ) {
-                        if (isSavingBooking) CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp))
-                        else Text(if (currentStep == 4) "Xác nhận đặt lịch" else "Tiếp Tục", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            },
+                            modifier = Modifier.fillMaxWidth().height(50.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = BluePrimary),
+                            shape = RoundedCornerShape(12.dp),
+                            enabled = !isSavingBooking
+                        ) {
+                            if (isSavingBooking) CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp))
+                            else Text(if (currentStep == 4) "Xác nhận đặt lịch" else "Tiếp Tục", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
@@ -404,7 +443,6 @@ fun BookingScreen(doctor: DoctorsModel, onBack: () -> Unit) {
                         Spacer(modifier = Modifier.height(16.dp))
                         SectionTitle("Phương thức thanh toán")
 
-                        // 🔴 CẬP NHẬT: Chọn phương thức linh hoạt
                         PaymentMethodSelector(
                             selectedMethod = selectedPaymentMethod,
                             onMethodSelected = { selectedPaymentMethod = it }
@@ -422,7 +460,7 @@ fun BookingScreen(doctor: DoctorsModel, onBack: () -> Unit) {
                             time = selectedTime ?: "",
                             total = finalTotal,
                             ticketId = generatedTicketId,
-                            status = finalTicketStatus, // Hiển thị đúng trạng thái động
+                            status = finalTicketStatus,
                             onHome = onBack
                         )
                     }
@@ -800,7 +838,6 @@ fun SubTotalCard(servicePrice: Int, addonPrice: Int) {
     }
 }
 
-// 🔴 CẬP NHẬT: Giao diện Selector cho phép click chọn giữa 2 Phương thức thanh toán
 @Composable
 fun PaymentMethodSelector(selectedMethod: Int, onMethodSelected: (Int) -> Unit) {
     Column {

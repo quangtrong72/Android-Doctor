@@ -23,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 
 // 1. CẬP NHẬT MODEL: Thêm đầy đủ các trường khớp với lúc đăng ký Firebase
@@ -57,24 +58,30 @@ fun PatientProfileScreen(
     // Nếu null -> Hiện danh sách. Nếu có dữ liệu -> Hiện chi tiết.
     var selectedPatient by remember { mutableStateOf<PatientModel?>(null) }
 
-    // Gọi dữ liệu từ Firebase
+    // 🔴 Gọi dữ liệu từ Firebase (ĐÃ BỔ SUNG PHÂN QUYỀN)
     LaunchedEffect(Unit) {
-        val db = FirebaseFirestore.getInstance()
-        db.collection("PatientProfiles")
-            .get()
-            .addOnSuccessListener { result ->
-                val list = result.map { document ->
-                    val patient = document.toObject(PatientModel::class.java)
-                    patient.id = document.id
-                    patient
+        val uid = FirebaseAuth.getInstance().currentUser?.uid
+        if (uid != null) {
+            val db = FirebaseFirestore.getInstance()
+            db.collection("PatientProfiles")
+                .whereEqualTo("userId", uid) // Lọc: Chỉ lấy hồ sơ của user hiện tại
+                .get()
+                .addOnSuccessListener { result ->
+                    val list = result.map { document ->
+                        val patient = document.toObject(PatientModel::class.java)
+                        patient.id = document.id
+                        patient
+                    }
+                    patients = list
+                    isLoading = false
                 }
-                patients = list
-                isLoading = false
-            }
-            .addOnFailureListener { exception ->
-                Log.d("Firestore", "Lỗi lấy dữ liệu: ", exception)
-                isLoading = false
-            }
+                .addOnFailureListener { exception ->
+                    Log.d("Firestore", "Lỗi lấy dữ liệu: ", exception)
+                    isLoading = false
+                }
+        } else {
+            isLoading = false
+        }
     }
 
     // --- KIỂM TRA TRẠNG THÁI ĐỂ ĐIỀU HƯỚNG MÀN HÌNH ---

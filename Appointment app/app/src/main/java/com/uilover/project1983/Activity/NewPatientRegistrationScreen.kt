@@ -30,7 +30,7 @@ import com.uilover.project1983.ViewModel.AddressViewModel
 import java.text.SimpleDateFormat
 import java.util.*
 
-// 1. CLASS ACTIVITY ĐỂ HỆ THỐNG NHẬN DIỆN VÀ CHUYỂN TRANG
+// Activity class (Lớp Activity) để hệ thống nhận diện và điều hướng trang
 class NewPatientRegistrationActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,7 +45,7 @@ class NewPatientRegistrationActivity : ComponentActivity() {
     }
 }
 
-// 2. GIAO DIỆN SCREEN VÀ LOGIC LƯU FIREBASE
+// Screen UI (Giao diện màn hình) và Logic xử lý Firestore
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NewPatientRegistrationScreen(
@@ -57,7 +57,7 @@ fun NewPatientRegistrationScreen(
 
     val PrimaryBlue = Color(0xFF1E88E5)
 
-    // --- State Dữ liệu chung ---
+    // --- State (Trạng thái) dữ liệu chung ---
     var fullName by remember { mutableStateOf("") }
     var cccd by remember { mutableStateOf("") }
     var bhyt by remember { mutableStateOf("") }
@@ -68,21 +68,21 @@ fun NewPatientRegistrationScreen(
     var country by remember { mutableStateOf("Việt Nam") }
     var ethnicity by remember { mutableStateOf("Kinh") }
 
-    // --- State & Logic Ngày Sinh ---
+    // --- State (Trạng thái) & Logic Ngày Sinh ---
     var dob by remember { mutableStateOf("") }
     var showDatePicker by remember { mutableStateOf(false) }
     val datePickerState = rememberDatePickerState()
 
-    // --- State Dữ liệu Địa chỉ ---
+    // --- State (Trạng thái) dữ liệu Địa chỉ ---
     var province by remember { mutableStateOf("") }
     var district by remember { mutableStateOf("") }
     var ward by remember { mutableStateOf("") }
     var street by remember { mutableStateOf("") }
 
-    // --- State Xử lý logic Firebase ---
+    // --- State (Trạng thái) xử lý logic Firebase ---
     var isLoading by remember { mutableStateOf(false) }
 
-    // --- Lắng nghe dữ liệu API ---
+    // --- Fetch data (Lấy dữ liệu) từ API thông qua ViewModel ---
     val provincesList by addressViewModel.provinces.collectAsState()
     val districtsList by addressViewModel.districts.collectAsState()
     val wardsList by addressViewModel.wards.collectAsState()
@@ -96,7 +96,7 @@ fun NewPatientRegistrationScreen(
             .fillMaxSize()
             .background(Color.White)
     ) {
-        // --- HEADER ---
+        // --- HEADER (Thanh tiêu đề) ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -104,21 +104,45 @@ fun NewPatientRegistrationScreen(
                 .padding(horizontal = 16.dp, vertical = 20.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Default.ArrowBack, contentDescription = "Quay lại", tint = Color.White, modifier = Modifier.size(28.dp).clickable { onBackClick() })
-            Text("Thêm hồ sơ mới", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+            Icon(
+                imageVector = Icons.Default.ArrowBack,
+                contentDescription = "Quay lại",
+                tint = Color.White,
+                modifier = Modifier.size(28.dp).clickable { onBackClick() }
+            )
+            Text(
+                text = "Thêm hồ sơ mới",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color.White,
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.Center
+            )
             Spacer(modifier = Modifier.size(28.dp))
         }
 
-        // --- NỘI DUNG FORM ---
+        // --- FORM CONTENT (Nội dung biểu mẫu) ---
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scrollState)
                 .padding(20.dp)
         ) {
-            Text("THÔNG TIN CHUNG", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = PrimaryBlue, modifier = Modifier.padding(bottom = 12.dp))
+            Text(
+                text = "THÔNG TIN CHUNG",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = PrimaryBlue,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
 
-            OutlinedTextField(value = fullName, onValueChange = { fullName = it }, label = { Text("Họ và tên (có dấu)") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+            OutlinedTextField(
+                value = fullName,
+                onValueChange = { fullName = it },
+                label = { Text("Họ và tên (có dấu)") },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            )
             Spacer(modifier = Modifier.height(12.dp))
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -156,7 +180,13 @@ fun NewPatientRegistrationScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            Text("ĐỊA CHỈ TRÊN CCCD", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = PrimaryBlue, modifier = Modifier.padding(bottom = 12.dp))
+            Text(
+                text = "ĐỊA CHỈ TRÊN CCCD",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = PrimaryBlue,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
 
             val provinceNames = provincesList.map { it.name }
             DropdownSelector("Tỉnh/Thành phố", province, provinceNames, { selectedName ->
@@ -188,7 +218,7 @@ fun NewPatientRegistrationScreen(
 
             Spacer(modifier = Modifier.height(40.dp))
 
-            // --- NÚT TẠO HỒ SƠ (FIREBASE FIRESTORE) ---
+            // --- SAVE DATA BUTTON (Nút lưu dữ liệu lên Firestore) ---
             Button(
                 onClick = {
                     if (fullName.isBlank() || phone.isBlank() || cccd.isBlank()) {
@@ -198,12 +228,12 @@ fun NewPatientRegistrationScreen(
 
                     isLoading = true
 
-                    // Lấy UID của User đang đăng nhập
+                    // Current User UID (Mã định danh người dùng hiện tại) từ FirebaseAuth
                     val uid = FirebaseAuth.getInstance().currentUser?.uid ?: ""
 
                     val db = FirebaseFirestore.getInstance()
                     val patientData = hashMapOf(
-                        "userId" to uid,
+                        "userId" to uid, // Đóng dấu quyền sở hữu riêng biệt cho từng tài khoản
                         "fullName" to fullName,
                         "dob" to dob,
                         "gender" to gender,
@@ -220,12 +250,13 @@ fun NewPatientRegistrationScreen(
                         "street" to street
                     )
 
+                    // Add document (Thêm tài liệu) vào Collection (Bộ sưu tập) PatientProfiles
                     db.collection("PatientProfiles")
                         .add(patientData)
                         .addOnSuccessListener {
                             isLoading = false
                             Toast.makeText(context, "Tạo hồ sơ thành công!", Toast.LENGTH_SHORT).show()
-                            onBackClick() // Đóng Activity và quay về BookingActivity
+                            onBackClick()
                         }
                         .addOnFailureListener { e ->
                             isLoading = false
@@ -247,7 +278,7 @@ fun NewPatientRegistrationScreen(
             Spacer(modifier = Modifier.height(120.dp))
         }
 
-        // --- DIALOG CHỌN NGÀY ---
+        // --- DATE PICKER DIALOG (Hộp thoại chọn ngày sinh) ---
         if (showDatePicker) {
             DatePickerDialog(
                 onDismissRequest = { showDatePicker = false },
@@ -273,7 +304,7 @@ fun NewPatientRegistrationScreen(
     }
 }
 
-// 3. COMPONENT DROPDOWN DÙNG CHUNG TRONG FORM
+// Dropdown component (Thành phần menu thả xuống) dùng chung trong biểu mẫu
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DropdownSelector(label: String, selectedValue: String, options: List<String>, onValueChange: (String) -> Unit) {

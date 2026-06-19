@@ -29,6 +29,9 @@ data class DoctorsModel(
     @get:PropertyName("Price") @set:PropertyName("Price") var Price: String = "300.000 VNĐ",
     @get:PropertyName("Schedule") @set:PropertyName("Schedule") var Schedule: String = "Thứ 2 - Thứ 6 (8:00 - 17:00)",
 
+    // 🔴 BỔ SUNG TRƯỜNG STATUS ĐỂ KHÔNG BỊ LỖI ĐỎ Ở TRANG CHI TIẾT
+    @get:PropertyName("status") @set:PropertyName("status") var status: String = "online",
+
     // 🔴 THÊM MỚI: Trường này dùng để lưu UID dài của Firebase Authentication
     // Không cần gắn PropertyName vì ta sẽ tự gán nó bằng code lúc gọi API
     var docUid: String = ""

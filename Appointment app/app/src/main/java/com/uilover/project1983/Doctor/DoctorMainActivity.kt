@@ -71,7 +71,8 @@ data class AppointmentModel(
     val patientName: String,
     val time: String,
     val date: String,
-    val status: String
+    val status: String,
+    val paymentMethod: String
 )
 
 data class NotificationModel(
@@ -124,12 +125,13 @@ fun DoctorMainScreen() {
     var doctorIsActive by remember { mutableStateOf(false) }
     var doctorWorkingHours by remember { mutableStateOf("08:00 - 17:00") }
 
+    var doctorNumericId by remember { mutableStateOf("") }
+
     var notifications by remember { mutableStateOf<List<NotificationModel>>(emptyList()) }
     var chatHistory by remember { mutableStateOf<List<ChatRoom>>(emptyList()) }
     var appointments by remember { mutableStateOf<List<AppointmentModel>>(emptyList()) }
     var isLoadingChats by remember { mutableStateOf(true) }
 
-    // 🔴 ĐẾM SỐ TIN NHẮN CHƯA ĐỌC TỰ ĐỘNG
     val unreadChatCount = chatHistory.count { it.isUnread }
 
     LaunchedEffect(currentDoctorId) {
@@ -143,6 +145,8 @@ fun DoctorMainScreen() {
                         val status = snapshot.child("status").value?.toString() ?: "offline"
                         doctorIsActive = (status == "online")
                         doctorWorkingHours = snapshot.child("WorkingHours").value?.toString() ?: "08:00 - 17:00"
+
+                        doctorNumericId = snapshot.child("Id").value?.toString()?.trim() ?: ""
                     }
                 }
                 override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
@@ -163,16 +167,31 @@ fun DoctorMainScreen() {
         onDispose { listener.remove() }
     }
 
-    DisposableEffect(currentDoctorId) {
-        if (currentDoctorId.isEmpty()) return@DisposableEffect onDispose {}
-        val listener = db.collection("Appointments").whereEqualTo("doctorId", currentDoctorId)
-            .addSnapshotListener { snapshot, _ ->
-                if (snapshot != null) {
-                    appointments = snapshot.documents.mapNotNull { doc ->
-                        AppointmentModel(doc.id, doc.getString("patientId") ?: "", doc.getString("patientName") ?: "Bệnh nhân", doc.getString("time") ?: "00:00", doc.getString("date") ?: "", doc.getString("status") ?: "pending")
-                    }
+    DisposableEffect(doctorNumericId) {
+        if (doctorNumericId.isEmpty()) return@DisposableEffect onDispose {}
+
+        val idNumber = doctorNumericId.toIntOrNull()
+        val query = if (idNumber != null) {
+            db.collection("Appointments").whereEqualTo("doctorId", idNumber)
+        } else {
+            db.collection("Appointments").whereEqualTo("doctorId", doctorNumericId)
+        }
+
+        val listener = query.addSnapshotListener { snapshot, _ ->
+            if (snapshot != null) {
+                appointments = snapshot.documents.mapNotNull { doc ->
+                    AppointmentModel(
+                        id = doc.id,
+                        patientUid = doc.getString("userId") ?: "",  // 🔴 Đã sửa từ patientId thành userId để lấy đúng Auth UID của Bệnh nhân
+                        patientName = doc.getString("patientName") ?: "Bệnh nhân",
+                        time = doc.getString("time") ?: "00:00",
+                        date = doc.getString("date") ?: "",
+                        status = doc.getString("status") ?: "pending",
+                        paymentMethod = doc.getString("paymentMethod") ?: "Tiền mặt"
+                    )
                 }
             }
+        }
         onDispose { listener.remove() }
     }
 
@@ -188,9 +207,8 @@ fun DoctorMainScreen() {
                 val timestamp = doc.getLong("timestamp") ?: 0L
                 val timeStr = if (timestamp > 0) SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(timestamp)) else ""
 
-                // 🔴 LOGIC KIỂM TRA CHƯA ĐỌC TUYỆT ĐỐI CHÍNH XÁC
                 val lastSenderId = doc.getString("lastSenderId") ?: ""
-                val isRead = doc.getBoolean("isRead") ?: true // Mặc định tin cũ là true
+                val isRead = doc.getBoolean("isRead") ?: true
                 val isUnread = (lastSenderId.isNotEmpty() && lastSenderId != currentDoctorId && isRead == false)
 
                 val nameState = mutableStateOf("Đang tải...")
@@ -225,7 +243,6 @@ fun DoctorMainScreen() {
             ChatDetailScreen(contactName = chatContactName, receiverId = chatReceiverId, onBackClick = { showChatDetail = false }, onVideoCallClick = { showVideoCall = true })
         } else {
             Scaffold(
-                // 🔴 Đẩy số tin nhắn chưa đọc vào hàm BottomNav
                 bottomBar = { DoctorBottomNav(selectedItem, unreadChatCount) { index -> selectedItem = index } }
             ) { paddingValues ->
                 Box(modifier = Modifier.padding(paddingValues)) {
@@ -296,6 +313,29 @@ fun DoctorDashboardContent(
         )
     }
 
+    val nextAppointment = remember(appointments) {
+        val sdf = java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", java.util.Locale.getDefault())
+        val currentTime = System.currentTimeMillis()
+
+        appointments
+            .filter { it.status == "Đã xác nhận" }
+            .mapNotNull { appt ->
+                try {
+                    val startTimeStr = appt.time.substringBefore("-").trim()
+                    val dateTimeString = "${appt.date} $startTimeStr"
+                    val dateObj = sdf.parse(dateTimeString)
+
+                    if (dateObj != null && dateObj.time + 3600000 > currentTime) {
+                        Pair(appt, dateObj.time)
+                    } else null
+                } catch (e: Exception) {
+                    null
+                }
+            }
+            .minByOrNull { it.second }
+            ?.first
+    }
+
     Scaffold(containerColor = DoctorBg) { padding ->
         LazyColumn(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 20.dp)) {
             item { Spacer(modifier = Modifier.height(30.dp)) }
@@ -340,10 +380,22 @@ fun DoctorDashboardContent(
 
             item { Text(text = "Lịch khám tiếp theo", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.Black) }
             item { Spacer(modifier = Modifier.height(12.dp)) }
+
             item {
-                if (appointments.isEmpty()) {
-                    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) { Text("Hiện tại không có lịch hẹn nào.", color = Color.Gray, modifier = Modifier.padding(20.dp)) }
-                } else { ActiveConsultationCard(appointment = appointments.first()) }
+                if (nextAppointment == null) {
+                    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                        Text("Hiện tại không có lịch hẹn sắp tới.", color = Color.Gray, modifier = Modifier.padding(20.dp))
+                    }
+                } else {
+                    // 🔴 ĐÃ SỬA: TRUYỀN SỰ KIỆN CLICK XUỐNG THẺ LỊCH KHÁM
+                    ActiveConsultationCard(
+                        appointment = nextAppointment,
+                        onContactClick = {
+                            val cleanName = nextAppointment.patientName.split(" - ")[0]
+                            onChatClick(cleanName, nextAppointment.patientUid, "")
+                        }
+                    )
+                }
             }
             item { Spacer(modifier = Modifier.height(24.dp)) }
 
@@ -363,27 +415,60 @@ fun DoctorDashboardContent(
     }
 }
 
+// 🔴 CẬP NHẬT GIAO DIỆN THẺ LỊCH KHÁM: BỔ SUNG SỰ KIỆN NÚT "LIÊN HỆ"
 @Composable
-fun ActiveConsultationCard(appointment: AppointmentModel) {
+fun ActiveConsultationCard(appointment: AppointmentModel, onContactClick: () -> Unit) {
     Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(4.dp)) {
         Column(modifier = Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                val statusColor = if (appointment.status == "Chưa thanh toán") Color(0xFFFF9800) else Color(0xFF4CAF50)
+
+                val isPendingCash = appointment.paymentMethod == "Tiền mặt"
+                val statusColor = if (isPendingCash) Color(0xFFFF9800) else Color(0xFF4CAF50)
+                val statusText = if (isPendingCash) "Chờ thu tiền - ${appointment.date}" else "Sắp diễn ra - ${appointment.date}"
+
                 Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(statusColor))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(text = if (appointment.status == "Chưa thanh toán") "Cần thu tiền - ${appointment.date}" else "Sắp diễn ra - ${appointment.date}", color = if (appointment.status == "Chưa thanh toán") Color(0xFFFF9800) else Color.Gray, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text(text = statusText, color = statusColor, fontWeight = FontWeight.Bold, fontSize = 14.sp)
             }
             Spacer(modifier = Modifier.height(12.dp))
             Text(text = appointment.patientName, fontWeight = FontWeight.Bold, fontSize = 20.sp)
             Text(text = "Khung giờ: ${appointment.time}", fontSize = 14.sp, color = DoctorBlue, modifier = Modifier.padding(top = 4.dp))
             Row(modifier = Modifier.padding(top = 16.dp)) {
-                if (appointment.status == "Chưa thanh toán") {
-                    Button(onClick = { FirebaseFirestore.getInstance().collection("Appointments").document(appointment.id).update("status", "Đã thanh toán") }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800)), shape = RoundedCornerShape(12.dp)) { Text("Đã thu tiền", color = Color.White, fontWeight = FontWeight.Bold) }
+
+                val isPendingCash = appointment.paymentMethod == "Tiền mặt"
+
+                if (isPendingCash) {
+                    Button(
+                        onClick = {
+                            val updates = hashMapOf<String, Any>(
+                                "paymentMethod" to "Đã thu tiền mặt",
+                                "status" to "Đã xác nhận"
+                            )
+                            FirebaseFirestore.getInstance().collection("Appointments").document(appointment.id).update(updates)
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) { Text("Thu tiền", color = Color.White, fontWeight = FontWeight.Bold) }
                 } else {
-                    OutlinedButton(onClick = { FirebaseFirestore.getInstance().collection("Appointments").document(appointment.id).update("status", "Đã khám") }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)) { Text("Hoàn thành", color = StatusGreen, fontWeight = FontWeight.Bold) }
+                    OutlinedButton(
+                        onClick = {
+                            FirebaseFirestore.getInstance().collection("Appointments").document(appointment.id).update("status", "Đã khám")
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) { Text("Hoàn thành", color = StatusGreen, fontWeight = FontWeight.Bold) }
                 }
+
                 Spacer(modifier = Modifier.width(12.dp))
-                Button(onClick = { }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = DoctorBlue), shape = RoundedCornerShape(12.dp)) { Text("Liên hệ") }
+
+                // 🔴 ĐÃ GẮN SỰ KIỆN CLICK VÀO NÚT LIÊN HỆ
+                Button(
+                    onClick = onContactClick,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = DoctorBlue),
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text("Liên hệ") }
             }
         }
     }
@@ -392,7 +477,6 @@ fun ActiveConsultationCard(appointment: AppointmentModel) {
 @Composable
 fun RecentChatItem(chat: ChatRoom, onClick: () -> Unit) {
     val isUnread = chat.isUnread
-    // 🔴 GIAO DIỆN TIN NHẮN CHƯA ĐỌC NỔI BẬT LÊN
     val msgColor = if (isUnread) Color.Black else Color.Gray
     val msgWeight = if (isUnread) FontWeight.ExtraBold else FontWeight.Normal
     val nameWeight = if (isUnread) FontWeight.ExtraBold else FontWeight.Bold
@@ -479,7 +563,6 @@ fun DoctorChatListScreen(chatList: List<ChatRoom>, isLoading: Boolean, onChatCli
     }
 }
 
-// 🔴 THÊM BADGEDBOX (Huy hiệu đỏ) VÀO THANH BOTTOM NAV
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DoctorBottomNav(selectedItem: Int, unreadChatCount: Int, onItemSelected: (Int) -> Unit) {

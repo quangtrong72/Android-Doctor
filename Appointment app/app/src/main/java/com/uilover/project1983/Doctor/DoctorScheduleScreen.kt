@@ -39,7 +39,8 @@ data class DoctorAppointmentModel(
     val date: String = "",
     val time: String = "",
     val status: String = "",
-    val totalAmount: Int = 0
+    val totalAmount: Int = 0,
+    val paymentMethod: String = "Tiền mặt"
 )
 
 data class DayModel(val dayOfWeek: String, val dateFull: String, val dayOfMonth: String)
@@ -57,11 +58,9 @@ fun DoctorScheduleScreen() {
     var allAppointments by remember { mutableStateOf<List<DoctorAppointmentModel>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
 
-    // --- LOGIC TABS CHO BÁC SĨ ---
     var selectedTabIndex by remember { mutableIntStateOf(0) }
     val tabs = listOf("Chờ duyệt", "Đã nhận", "Đã khám", "Đã hủy")
 
-    // BỘ LẮNG NGHE TỰ ĐỘNG NHẬN DIỆN TÀI KHOẢN ĐANG ĐĂNG NHẬP
     val doctorUid = FirebaseAuth.getInstance().currentUser?.uid
 
     DisposableEffect(doctorUid) {
@@ -71,15 +70,11 @@ fun DoctorScheduleScreen() {
 
         if (doctorUid != null) {
             isLoading = true
-            // 🔴 ĐÃ FIX: Chuyển "Doctors" (Chữ D hoa) để khớp với Realtime DB
             realtimeDb.getReference("Doctors").child(doctorUid).get()
                 .addOnSuccessListener { snapshot ->
-
-                    // Lấy ra giá trị Id và ép về dạng Chuỗi cho an toàn tuyệt đối
                     val realDoctorId = snapshot.child("Id").value?.toString()?.trim()
 
                     if (!realDoctorId.isNullOrEmpty()) {
-                        // Tìm thấy bác sĩ, bắt đầu lấy lịch từ Firestore
                         firestoreListener = firestoreDb.collection("Appointments")
                             .addSnapshotListener { querySnapshot, error ->
                                 if (error != null) {
@@ -91,10 +86,8 @@ fun DoctorScheduleScreen() {
                                 if (querySnapshot != null) {
                                     val list = mutableListOf<DoctorAppointmentModel>()
                                     for (doc in querySnapshot.documents) {
-                                        // Ép doctorId trên Firestore về Chuỗi
                                         val doctorIdOnDb = doc.get("doctorId")?.toString()?.trim() ?: ""
 
-                                        // So sánh 2 Chuỗi với nhau
                                         if (doctorIdOnDb == realDoctorId) {
                                             list.add(
                                                 DoctorAppointmentModel(
@@ -105,7 +98,8 @@ fun DoctorScheduleScreen() {
                                                     date = doc.getString("date") ?: "",
                                                     time = doc.getString("time") ?: "",
                                                     status = doc.getString("status") ?: "Chưa xác định",
-                                                    totalAmount = doc.getLong("totalAmount")?.toInt() ?: 0
+                                                    totalAmount = doc.getLong("totalAmount")?.toInt() ?: 0,
+                                                    paymentMethod = doc.getString("paymentMethod") ?: "Tiền mặt"
                                                 )
                                             )
                                         }
@@ -130,11 +124,9 @@ fun DoctorScheduleScreen() {
         onDispose { firestoreListener?.remove() }
     }
 
-    // --- BỘ LỌC KÉP: Lọc theo Ngày TRƯỚC, lọc theo Tab SAU ---
     val appointmentsForSelectedDate = allAppointments.filter { it.date == selectedDate }.sortedBy { it.time }
 
     val filteredAppointments = when (selectedTabIndex) {
-        // 🔴 ĐÃ FIX: Tab "Chờ duyệt" hiện cả phiếu thanh toán online lẫn phiếu trả tiền mặt
         0 -> appointmentsForSelectedDate.filter { it.status == "Đã thanh toán" || it.status == "Chưa thanh toán" }
         1 -> appointmentsForSelectedDate.filter { it.status == "Đã xác nhận" }
         2 -> appointmentsForSelectedDate.filter { it.status == "Đã khám" }
@@ -152,7 +144,7 @@ fun DoctorScheduleScreen() {
         containerColor = BgGray
     ) { paddingValues ->
         Column(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
-            // --- 1. THANH CUỘN CHỌN NGÀY ---
+            // 1. THANH CUỘN CHỌN NGÀY
             Box(modifier = Modifier.fillMaxWidth().background(Color.White).padding(vertical = 12.dp)) {
                 LazyRow(
                     contentPadding = PaddingValues(horizontal = 16.dp),
@@ -173,7 +165,7 @@ fun DoctorScheduleScreen() {
 
             HorizontalDivider(color = Color.LightGray.copy(alpha = 0.3f), thickness = 1.dp)
 
-            // --- 2. THANH TAB PHÂN LOẠI TRẠNG THÁI LỊCH ---
+            // 2. THANH TAB PHÂN LOẠI TRẠNG THÁI LỊCH
             ScrollableTabRow(
                 selectedTabIndex = selectedTabIndex,
                 containerColor = Color.White,
@@ -205,7 +197,7 @@ fun DoctorScheduleScreen() {
                 }
             }
 
-            // --- 3. THỐNG KÊ NHANH ---
+            // 3. THỐNG KÊ NHANH
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -215,7 +207,7 @@ fun DoctorScheduleScreen() {
                 Text(text = selectedDate, color = BluePrimary, fontWeight = FontWeight.Medium, fontSize = 14.sp)
             }
 
-            // --- 4. DANH SÁCH BỆNH NHÂN TRONG NGÀY ---
+            // 4. DANH SÁCH BỆNH NHÂN TRONG NGÀY
             Box(modifier = Modifier.fillMaxSize()) {
                 if (isLoading) {
                     CircularProgressIndicator(color = BluePrimary, modifier = Modifier.align(Alignment.Center))
@@ -237,25 +229,30 @@ fun DoctorScheduleScreen() {
                             val appointment = filteredAppointments[index]
                             ScheduleItemCard(
                                 appointment = appointment,
+                                currentTab = selectedTabIndex,
                                 onUpdateStatus = { newStatus ->
                                     val db = FirebaseFirestore.getInstance()
+                                    val updates = hashMapOf<String, Any>("status" to newStatus)
+                                    if (newStatus == "Đã thanh toán (Tiền mặt)") {
+                                        updates["paymentMethod"] = "Đã thu tiền mặt"
+                                        updates["status"] = "Đã xác nhận"
+                                    }
+
                                     db.collection("Appointments").document(appointment.id)
-                                        .update("status", newStatus)
+                                        .update(updates)
                                         .addOnSuccessListener {
                                             val notifType = if (newStatus == "Đã hủy") "cancel" else "success"
-
-                                            // 🔴 CẬP NHẬT THÔNG BÁO CHO TRƯỜNG HỢP THU TIỀN MẶT
                                             val notifTitle = when (newStatus) {
                                                 "Đã hủy" -> "Lịch khám bị hủy"
-                                                "Đã thanh toán" -> "Đã nhận thanh toán"
                                                 "Đã xác nhận" -> "Lịch khám đã được xác nhận"
+                                                "Đã thanh toán (Tiền mặt)" -> "Đã nhận thanh toán"
                                                 "Đã khám" -> "Hoàn thành ca khám"
                                                 else -> "Cập nhật lịch khám"
                                             }
                                             val notifMessage = when (newStatus) {
                                                 "Đã hủy" -> "Rất tiếc, bác sĩ không thể tiếp nhận ca khám ${appointment.serviceName} ngày ${appointment.date}."
-                                                "Đã thanh toán" -> "Thanh toán cho ca khám ${appointment.serviceName} ngày ${appointment.date} đã được xác nhận. Vui lòng chờ bác sĩ duyệt lịch!"
                                                 "Đã xác nhận" -> "Lịch khám ${appointment.serviceName} lúc ${appointment.time} ngày ${appointment.date} đã được bác sĩ chốt. Vui lòng đến đúng giờ!"
+                                                "Đã thanh toán (Tiền mặt)" -> "Thanh toán bằng tiền mặt cho ca khám ${appointment.serviceName} ngày ${appointment.date} đã được xác nhận."
                                                 "Đã khám" -> "Ca khám ${appointment.serviceName} ngày ${appointment.date} đã hoàn thành. Chúc bạn nhiều sức khỏe!"
                                                 else -> ""
                                             }
@@ -269,7 +266,7 @@ fun DoctorScheduleScreen() {
                                                 "isRead" to false
                                             )
                                             db.collection("Notifications").add(notifData)
-                                            Toast.makeText(context, "Đã cập nhật trạng thái", Toast.LENGTH_SHORT).show()
+                                            Toast.makeText(context, "Đã thao tác thành công", Toast.LENGTH_SHORT).show()
                                         }
                                 }
                             )
@@ -281,8 +278,6 @@ fun DoctorScheduleScreen() {
         }
     }
 }
-
-// --- CÁC THÀNH PHẦN GIAO DIỆN (UI Components) ---
 
 @Composable
 fun DateCard(dayOfWeek: String, dayOfMonth: String, isSelected: Boolean, onClick: () -> Unit) {
@@ -303,16 +298,19 @@ fun DateCard(dayOfWeek: String, dayOfMonth: String, isSelected: Boolean, onClick
 }
 
 @Composable
-fun ScheduleItemCard(appointment: DoctorAppointmentModel, onUpdateStatus: (String) -> Unit) {
+fun ScheduleItemCard(appointment: DoctorAppointmentModel, currentTab: Int, onUpdateStatus: (String) -> Unit) {
     val BluePrimary = Color(0xFF1E88E5)
 
-    // 🔴 ĐÃ BỔ SUNG TRẠNG THÁI "CHƯA THANH TOÁN" VỚI MÀU CAM CẢNH BÁO
-    val (displayStatus, statusColor) = when (appointment.status) {
-        "Chưa thanh toán" -> "Cần thu tiền" to Color(0xFFFF9800)
-        "Đã thanh toán" -> "Chờ duyệt" to Color(0xFFE65100)
-        "Đã xác nhận" -> "Đã nhận lịch" to Color(0xFF4CAF50)
-        "Đã khám" -> "Đã hoàn thành" to Color(0xFF2196F3)
-        "Đã hủy" -> "Đã từ chối" to Color(0xFFF44336)
+    // Xác định Trạng Thái hiển thị
+    val (displayStatus, statusColor) = when {
+        appointment.status == "Chưa thanh toán" -> "Chưa thanh toán" to Color(0xFFFF9800)
+        appointment.status == "Đã thanh toán" -> "Đã thanh toán" to Color(0xFFE65100)
+        appointment.status == "Đã xác nhận" -> {
+            if (appointment.paymentMethod == "Tiền mặt") "Chờ thu tiền" to Color(0xFFFF9800)
+            else "Đã nhận lịch" to Color(0xFF4CAF50)
+        }
+        appointment.status == "Đã khám" -> "Đã hoàn thành" to Color(0xFF2196F3)
+        appointment.status == "Đã hủy" -> "Đã từ chối" to Color(0xFFF44336)
         else -> appointment.status to Color.Gray
     }
 
@@ -348,17 +346,9 @@ fun ScheduleItemCard(appointment: DoctorAppointmentModel, onUpdateStatus: (Strin
                     Text(text = displayStatus, color = statusColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
 
-                // 🔴 XỬ LÝ CÁC NÚT BẤM DỰA VÀO TỪNG TRẠNG THÁI
-                when (appointment.status) {
-                    "Chưa thanh toán" -> {
-                        Button(
-                            onClick = { onUpdateStatus("Đã thanh toán") },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800)),
-                            contentPadding = PaddingValues(horizontal = 12.dp),
-                            modifier = Modifier.height(36.dp)
-                        ) { Text("Đã thu tiền", fontSize = 13.sp) }
-                    }
-                    "Đã thanh toán" -> {
+                // LOGIC CÁC NÚT BẤM KẾT HỢP SO SÁNH NGÀY
+                when (currentTab) {
+                    0 -> { // TAB CHỜ DUYỆT (Được phép Xác nhận cho cả lịch tương lai)
                         Row {
                             OutlinedButton(
                                 onClick = { onUpdateStatus("Đã hủy") },
@@ -376,13 +366,40 @@ fun ScheduleItemCard(appointment: DoctorAppointmentModel, onUpdateStatus: (Strin
                             ) { Text("Xác nhận", fontSize = 13.sp) }
                         }
                     }
-                    "Đã xác nhận" -> {
-                        Button(
-                            onClick = { onUpdateStatus("Đã khám") },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            modifier = Modifier.height(36.dp)
-                        ) { Text("Hoàn thành", fontSize = 13.sp) }
+                    1 -> { // TAB ĐÃ NHẬN
+                        // Thuật toán kiểm tra lịch tương lai
+                        val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                        val today = try { sdf.parse(sdf.format(Date())) } catch (e: Exception) { Date() }
+                        val appDate = try { sdf.parse(appointment.date) } catch (e: Exception) { today }
+                        val isFutureDate = appDate != null && today != null && appDate.time > today.time
+
+                        if (isFutureDate) {
+                            // 🔴 Chưa tới ngày khám -> Khóa nút Hoàn thành/Thu tiền
+                            Button(
+                                onClick = { },
+                                enabled = false,
+                                colors = ButtonDefaults.buttonColors(disabledContainerColor = Color(0xFFE0E0E0)),
+                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                modifier = Modifier.height(36.dp)
+                            ) { Text("Chưa tới ngày khám", fontSize = 13.sp, color = Color.Gray) }
+                        } else {
+                            // 🟢 Đã tới ngày khám hoặc ngày cũ -> Cho phép xử lý
+                            if (appointment.paymentMethod == "Tiền mặt") {
+                                Button(
+                                    onClick = { onUpdateStatus("Đã thanh toán (Tiền mặt)") },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800)),
+                                    contentPadding = PaddingValues(horizontal = 12.dp),
+                                    modifier = Modifier.height(36.dp)
+                                ) { Text("Thu tiền mặt", fontSize = 13.sp) }
+                            } else {
+                                Button(
+                                    onClick = { onUpdateStatus("Đã khám") },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+                                    contentPadding = PaddingValues(horizontal = 16.dp),
+                                    modifier = Modifier.height(36.dp)
+                                ) { Text("Hoàn thành", fontSize = 13.sp) }
+                            }
+                        }
                     }
                 }
             }
