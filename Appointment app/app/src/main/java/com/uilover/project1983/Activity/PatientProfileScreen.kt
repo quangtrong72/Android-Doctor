@@ -1,5 +1,6 @@
 package com.uilover.project1983.Activity
 
+import android.content.Intent
 import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -19,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -51,16 +53,22 @@ fun PatientProfileScreen(
     onBackClick: () -> Unit,
     onRegisterNewClick: () -> Unit
 ) {
+    val context = LocalContext.current
+    val currentUser = FirebaseAuth.getInstance().currentUser // Lấy thông tin user hiện tại
+
     var patients by remember { mutableStateOf<List<PatientModel>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
+
+    // 🔴 BIẾN QUẢN LÝ HỘP THOẠI ĐĂNG NHẬP (CHO KHÁCH)
+    var showLoginDialog by remember { mutableStateOf(false) }
 
     // BIẾN QUẢN LÝ TRẠNG THÁI XEM CHI TIẾT
     // Nếu null -> Hiện danh sách. Nếu có dữ liệu -> Hiện chi tiết.
     var selectedPatient by remember { mutableStateOf<PatientModel?>(null) }
 
-    // 🔴 Gọi dữ liệu từ Firebase (ĐÃ BỔ SUNG PHÂN QUYỀN)
+    // Gọi dữ liệu từ Firebase (ĐÃ BỔ SUNG PHÂN QUYỀN)
     LaunchedEffect(Unit) {
-        val uid = FirebaseAuth.getInstance().currentUser?.uid
+        val uid = currentUser?.uid
         if (uid != null) {
             val db = FirebaseFirestore.getInstance()
             db.collection("PatientProfiles")
@@ -84,88 +92,123 @@ fun PatientProfileScreen(
         }
     }
 
-    // --- KIỂM TRA TRẠNG THÁI ĐỂ ĐIỀU HƯỚNG MÀN HÌNH ---
-    if (selectedPatient != null) {
-        // MÀN HÌNH CHI TIẾT HỒ SƠ
-        PatientDetailScreen(
-            patient = selectedPatient!!,
-            paddingValues = paddingValues,
-            onBackClick = { selectedPatient = null } // Bấm quay lại thì gán null để về danh sách
-        )
-    } else {
-        // MÀN HÌNH DANH SÁCH HỒ SƠ (GIAO DIỆN CHÍNH)
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xFFF7F9FC))
-                .padding(bottom = paddingValues.calculateBottomPadding()),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // HEADER
-            Row(
+    Box(modifier = Modifier.fillMaxSize()) {
+        // --- KIỂM TRA TRẠNG THÁI ĐỂ ĐIỀU HƯỚNG MÀN HÌNH ---
+        if (selectedPatient != null) {
+            // MÀN HÌNH CHI TIẾT HỒ SƠ
+            PatientDetailScreen(
+                patient = selectedPatient!!,
+                paddingValues = paddingValues,
+                onBackClick = { selectedPatient = null } // Bấm quay lại thì gán null để về danh sách
+            )
+        } else {
+            // MÀN HÌNH DANH SÁCH HỒ SƠ (GIAO DIỆN CHÍNH)
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .background(PrimaryBlue)
-                    .padding(horizontal = 16.dp, vertical = 20.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .fillMaxSize()
+                    .background(Color(0xFFF7F9FC))
+                    .padding(bottom = paddingValues.calculateBottomPadding()),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Quay lại", tint = Color.White, modifier = Modifier.size(28.dp).clickable { onBackClick() })
-                Text("Hồ sơ bệnh nhân", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
-                Spacer(modifier = Modifier.size(28.dp))
-            }
+                // HEADER
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(PrimaryBlue)
+                        .padding(horizontal = 16.dp, vertical = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Quay lại", tint = Color.White, modifier = Modifier.size(28.dp).clickable { onBackClick() })
+                    Text("Hồ sơ bệnh nhân", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+                    Spacer(modifier = Modifier.size(28.dp))
+                }
 
-            // NỘI DUNG (LOADING / TRỐNG / DANH SÁCH)
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                if (isLoading) {
-                    CircularProgressIndicator(color = PrimaryBlue, modifier = Modifier.align(Alignment.Center))
-                } else if (patients.isEmpty()) {
-                    Column(
-                        modifier = Modifier.fillMaxSize().padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Box(modifier = Modifier.size(130.dp).background(LightBlueCard, shape = CircleShape), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.Assignment, null, tint = PrimaryBlue, modifier = Modifier.size(65.dp))
+                // NỘI DUNG (LOADING / TRỐNG / DANH SÁCH)
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    if (isLoading) {
+                        CircularProgressIndicator(color = PrimaryBlue, modifier = Modifier.align(Alignment.Center))
+                    } else if (patients.isEmpty()) {
+                        Column(
+                            modifier = Modifier.fillMaxSize().padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Box(modifier = Modifier.size(130.dp).background(LightBlueCard, shape = CircleShape), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Assignment, null, tint = PrimaryBlue, modifier = Modifier.size(65.dp))
+                            }
+                            Spacer(modifier = Modifier.height(24.dp))
+                            Text("Chưa có hồ sơ bệnh nhân nào", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextDarkBlue)
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text("Bạn được tạo tối đa 10 hồ sơ cá nhân\nvà người thân trong gia đình", fontSize = 14.sp, color = TextSecondary, textAlign = TextAlign.Center, lineHeight = 20.sp)
                         }
-                        Spacer(modifier = Modifier.height(24.dp))
-                        Text("Chưa có hồ sơ bệnh nhân nào", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextDarkBlue)
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text("Bạn được tạo tối đa 10 hồ sơ cá nhân\nvà người thân trong gia đình", fontSize = 14.sp, color = TextSecondary, textAlign = TextAlign.Center, lineHeight = 20.sp)
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        item {
-                            Text("Danh sách hồ sơ (${patients.size}/10)", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextDarkBlue, modifier = Modifier.padding(bottom = 8.dp))
-                        }
-                        items(patients) { patient ->
-                            // Bắt sự kiện click để mở Chi tiết
-                            PatientCard(patient, onClick = { selectedPatient = patient })
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            item {
+                                Text("Danh sách hồ sơ (${patients.size}/10)", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextDarkBlue, modifier = Modifier.padding(bottom = 8.dp))
+                            }
+                            items(patients) { patient ->
+                                // Bắt sự kiện click để mở Chi tiết
+                                PatientCard(patient, onClick = { selectedPatient = patient })
+                            }
                         }
                     }
                 }
-            }
 
-            // NÚT ĐĂNG KÝ MỚI
-            Button(
-                onClick = { onRegisterNewClick() },
-                colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 24.dp)
-                    .height(54.dp)
-                    .shadow(4.dp, RoundedCornerShape(14.dp))
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Add, contentDescription = null, tint = Color.White)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Chưa từng khám đăng ký mới", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                // NÚT ĐĂNG KÝ MỚI
+                Button(
+                    onClick = {
+                        // 🔴 KIỂM TRA QUYỀN TRUY CẬP CỦA KHÁCH
+                        if (currentUser == null) {
+                            showLoginDialog = true
+                        } else {
+                            onRegisterNewClick()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 24.dp)
+                        .height(54.dp)
+                        .shadow(4.dp, RoundedCornerShape(14.dp))
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Add, contentDescription = null, tint = Color.White)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Chưa từng khám đăng ký mới", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
                 }
             }
+        }
+
+        // 🔴 HIỂN THỊ HỘP THOẠI YÊU CẦU ĐĂNG NHẬP
+        if (showLoginDialog) {
+            AlertDialog(
+                onDismissRequest = { showLoginDialog = false },
+                title = { Text("Yêu cầu đăng nhập", fontWeight = FontWeight.Bold) },
+                text = { Text("Tính năng này yêu cầu tài khoản. Bạn có muốn chuyển đến trang Đăng nhập để tiếp tục không?") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showLoginDialog = false
+                            context.startActivity(Intent(context, LoginActivity::class.java))
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue)
+                    ) {
+                        Text("Đăng nhập")
+                    }
+                },
+                dismissButton = {
+                    OutlinedButton(onClick = { showLoginDialog = false }) {
+                        Text("Hủy", color = Color.Gray)
+                    }
+                },
+                containerColor = Color.White
+            )
         }
     }
 }
@@ -228,7 +271,7 @@ fun PatientDetailScreen(patient: PatientModel, paddingValues: PaddingValues, onB
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text("THÔNG TIN CHUNG", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = PrimaryBlue, modifier = Modifier.padding(bottom = 12.dp))
-                    Divider(color = Color(0xFFF0F0F0))
+                    HorizontalDivider(color = Color(0xFFF0F0F0))
                     Spacer(modifier = Modifier.height(8.dp))
 
                     DetailRow("Ngày sinh", patient.dob)
@@ -254,7 +297,7 @@ fun PatientDetailScreen(patient: PatientModel, paddingValues: PaddingValues, onB
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text("ĐỊA CHỈ", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = PrimaryBlue, modifier = Modifier.padding(bottom = 12.dp))
-                    Divider(color = Color(0xFFF0F0F0))
+                    HorizontalDivider(color = Color(0xFFF0F0F0))
                     Spacer(modifier = Modifier.height(8.dp))
 
                     DetailRow("Tỉnh/Thành phố", patient.province)

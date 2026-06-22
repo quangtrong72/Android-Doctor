@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin - Quản lý chuyên khoa</title>
+    <style>
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background-color: #f5f7fb;
+        margin: 0;
+        padding: 20px;
+      }
+      .container {
+        max-width: 800px;
+        margin: 0 auto;
+        background: white;
+        padding: 20px;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+      }
+      h2 {
+        color: #1e88e5;
+        text-align: center;
+      }
+
+      /* Form thêm chuyên khoa */
+      .add-form {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 24px;
+        background: #e3f2fd;
+        padding: 16px;
+        border-radius: 8px;
+      }
+      .add-form input {
+        flex: 1;
+        padding: 10px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        font-size: 15px;
+      }
+      .add-form button {
+        background: #1e88e5;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 6px;
+        font-weight: bold;
+        cursor: pointer;
+        transition: 0.2s;
+      }
+      .add-form button:hover {
+        background: #1565c0;
+      }
+
+      /* Bảng danh sách */
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+      }
+      th,
+      td {
+        padding: 12px;
+        text-align: left;
+        border-bottom: 1px solid #eee;
+      }
+      th {
+        background-color: #f8f9fa;
+        color: #333;
+        font-weight: bold;
+      }
+      tr:hover {
+        background-color: #f1f1f1;
+      }
+
+      /* Nút hành động */
+      .btn-delete {
+        background: #f44336;
+        color: white;
+        border: none;
+        padding: 6px 12px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 13px;
+      }
+      .btn-delete:hover {
+        background: #d32f2f;
+      }
+
+      /* Loading */
+      #loading {
+        text-align: center;
+        color: #1e88e5;
+        font-weight: bold;
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h2>QUẢN LÝ CHUYÊN KHOA</h2>
+
+      <!-- Form thêm mới -->
+      <div class="add-form">
+        <input
+          type="text"
+          id="specialtyName"
+          placeholder="Nhập tên chuyên khoa mới (VD: Khoa Nhi)..."
+          required
+        />
+        <button id="btnAdd" onclick="addSpecialty()">+ Thêm mới</button>
+      </div>
+
+      <div id="loading">Đang tải dữ liệu...</div>
+
+      <!-- Bảng hiển thị -->
+      <table>
+        <thead>
+          <tr>
+            <th width="50px">STT</th>
+            <th>Tên chuyên khoa</th>
+            <th width="100px">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody id="specialtyTableBody">
+          <!-- Dữ liệu sẽ được render vào đây bằng JS -->
+        </tbody>
+      </table>
+    </div>
+
+    <!-- IMPORT FIREBASE SDK v9 -->
+    <script type="module">
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+      import {
+        getFirestore,
+        collection,
+        addDoc,
+        getDocs,
+        deleteDoc,
+        doc,
+      } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+      // 🔴 1. THAY BẰNG CẤU HÌNH FIREBASE CỦA BẠN (Lấy trong Project Settings > Web App)
+      const firebaseConfig = {
+        apiKey: "AIzaSyB-XXXXXX",
+        authDomain: "project1983-xxxx.firebaseapp.com",
+        projectId: "project1983-xxxx",
+        storageBucket: "project1983-xxxx.appspot.com",
+        messagingSenderId: "xxxx",
+        appId: "1:xxxx:web:xxxx",
+      };
+
+      // Khởi tạo Firebase
+      const app = initializeApp(firebaseConfig);
+      const db = getFirestore(app);
+      const specialtiesRef = collection(db, "Specialties");
+
+      // Các biến giao diện
+      const tableBody = document.getElementById("specialtyTableBody");
+      const loading = document.getElementById("loading");
+      const inputName = document.getElementById("specialtyName");
+
+      // 🔴 2. HÀM TẢI DANH SÁCH CHUYÊN KHOA TỪ FIRESTORE
+      async function loadSpecialties() {
+        loading.style.display = "block";
+        tableBody.innerHTML = ""; // Xóa bảng cũ
+
+        try {
+          const snapshot = await getDocs(specialtiesRef);
+          let index = 1;
+          snapshot.forEach((document) => {
+            const data = document.data();
+            const row = `
+                    <tr>
+                        <td>${index++}</td>
+                        <td><strong>${data.name}</strong></td>
+                        <td>
+                            <button class="btn-delete" onclick="deleteSpecialty('${document.id}')">Xóa</button>
+                        </td>
+                    </tr>
+                `;
+            tableBody.insertAdjacentHTML("beforeend", row);
+          });
+        } catch (error) {
+          console.error("Lỗi tải dữ liệu: ", error);
+          alert("Không thể tải dữ liệu!");
+        } finally {
+          loading.style.display = "none";
+        }
+      }
+
+      // 🔴 3. HÀM THÊM CHUYÊN KHOA MỚI
+      window.addSpecialty = async function () {
+        const nameVal = inputName.value.trim();
+        if (!nameVal) {
+          alert("Vui lòng nhập tên chuyên khoa!");
+          return;
+        }
+
+        try {
+          await addDoc(specialtiesRef, {
+            name: nameVal,
+            createdAt: new Date().getTime(),
+          });
+          inputName.value = ""; // Xóa input
+          alert("Thêm thành công!");
+          loadSpecialties(); // Tải lại bảng
+        } catch (error) {
+          console.error("Lỗi khi thêm: ", error);
+          alert("Lỗi khi thêm chuyên khoa!");
+        }
+      };
+
+      // 🔴 4. HÀM XÓA CHUYÊN KHOA
+      window.deleteSpecialty = async function (id) {
+        if (confirm("Bạn có chắc chắn muốn xóa chuyên khoa này không?")) {
+          try {
+            await deleteDoc(doc(db, "Specialties", id));
+            alert("Xóa thành công!");
+            loadSpecialties(); // Tải lại bảng
+          } catch (error) {
+            console.error("Lỗi khi xóa: ", error);
+            alert("Lỗi khi xóa chuyên khoa!");
+          }
+        }
+      };
+
+      // Tự động tải dữ liệu khi mở trang
+      loadSpecialties();
+    </script>
+  </body>
+</html>

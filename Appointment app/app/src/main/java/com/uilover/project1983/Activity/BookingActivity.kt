@@ -94,10 +94,14 @@ fun BookingScreen(doctor: DoctorsModel, onBack: () -> Unit) {
     var isSavingBooking by remember { mutableStateOf(false) }
     var generatedTicketId by remember { mutableStateOf("Đang khởi tạo...") }
 
-    // 🔴 1. KHAI BÁO BIẾN LƯU TRẠNG THÁI REALTIME CỦA BÁC SĨ
-    var doctorRealtimeStatus by remember { mutableStateOf(doctor.status) }
+    // 🔴 BIẾN HIỂN THỊ HỘP THOẠI YÊU CẦU ĐĂNG NHẬP
+    var showLoginDialog by remember { mutableStateOf(false) }
 
-    // 🔴 2. LẮNG NGHE SỰ THAY ĐỔI TRẠNG THÁI TỪ FIREBASE REALTIME DB
+    // 1. KHAI BÁO BIẾN LƯU TRẠNG THÁI REALTIME CỦA BÁC SĨ & LẤY THÔNG TIN USER
+    var doctorRealtimeStatus by remember { mutableStateOf(doctor.status) }
+    val currentUser = FirebaseAuth.getInstance().currentUser
+
+    // 2. LẮNG NGHE SỰ THAY ĐỔI TRẠNG THÁI TỪ FIREBASE REALTIME DB
     DisposableEffect(doctor.docUid) {
         if (doctor.docUid.isNotEmpty()) {
             val ref = FirebaseDatabase.getInstance().getReference("Doctors").child(doctor.docUid)
@@ -118,8 +122,6 @@ fun BookingScreen(doctor: DoctorsModel, onBack: () -> Unit) {
     // --- Trạng thái Cổng thanh toán ---
     var showPaymentGateway by remember { mutableStateOf(false) }
     var tempBookingId by remember { mutableStateOf("") }
-
-    // 0 là Chuyển khoản QR, 1 là Thanh toán trực tiếp
     var selectedPaymentMethod by remember { mutableIntStateOf(0) }
     var finalTicketStatus by remember { mutableStateOf("Chưa thanh toán") }
 
@@ -129,7 +131,6 @@ fun BookingScreen(doctor: DoctorsModel, onBack: () -> Unit) {
     var selectedDate by remember { mutableStateOf<String?>(null) }
     var selectedTime by remember { mutableStateOf<String?>(null) }
 
-    // Dữ liệu quản lý Lịch & Giờ
     var bookedTimes by remember { mutableStateOf<List<String>>(emptyList()) }
     var isFetchingTimes by remember { mutableStateOf(false) }
 
@@ -171,7 +172,6 @@ fun BookingScreen(doctor: DoctorsModel, onBack: () -> Unit) {
         }
     }
 
-    // TÍNH TOÁN CÁC GIỜ BỊ KHÓA
     val disabledTimes = remember(bookedTimes, selectedDate, morningSlots, afternoonSlots) {
         val disabled = bookedTimes.toMutableList()
 
@@ -298,175 +298,214 @@ fun BookingScreen(doctor: DoctorsModel, onBack: () -> Unit) {
         )
     }
 
-    Scaffold(
-        topBar = {
-            if (currentStep < 5) {
-                Column(modifier = Modifier.background(BluePrimary)) {
-                    CenterAlignedTopAppBar(
-                        title = { Text(getStepTitle(currentStep), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp) },
-                        navigationIcon = {
-                            IconButton(onClick = { if (currentStep > 1) currentStep-- else onBack() }) {
-                                Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            topBar = {
+                if (currentStep < 5) {
+                    Column(modifier = Modifier.background(BluePrimary)) {
+                        CenterAlignedTopAppBar(
+                            title = { Text(getStepTitle(currentStep), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp) },
+                            navigationIcon = {
+                                IconButton(onClick = { if (currentStep > 1) currentStep-- else onBack() }) {
+                                    Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
+                                }
+                            },
+                            colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                        )
+                        StepperRow(currentStep = currentStep)
+                    }
+                }
+            },
+            bottomBar = {
+                if (currentStep < 5) {
+                    Box(modifier = Modifier.fillMaxWidth().background(Color.White).padding(16.dp)) {
+
+                        if (doctorRealtimeStatus == "offline") {
+                            Button(
+                                onClick = { Toast.makeText(context, "Xin lỗi, bác sĩ vừa báo bận đột xuất và không nhận thêm lịch hôm nay.", Toast.LENGTH_LONG).show() },
+                                modifier = Modifier.fillMaxWidth().height(50.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.Gray),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Bác sĩ đang bận (Không nhận lịch)", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
                             }
-                        },
-                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
-                    )
-                    StepperRow(currentStep = currentStep)
+                        } else {
+                            Button(
+                                onClick = {
+                                    // 🔴 LOGIC: NẾU CHƯA ĐĂNG NHẬP, BẬT HỘP THOẠI LÊN VÀ CHẶN LẠI
+                                    if (currentUser == null) {
+                                        showLoginDialog = true
+                                        return@Button
+                                    }
+
+                                    when (currentStep) {
+                                        1 -> if (selectedService != null && selectedDate != null && selectedTime != null) currentStep++
+                                        2 -> if (selectedProfile != null) currentStep++
+                                        3 -> currentStep++
+                                        4 -> {
+                                            if (selectedPaymentMethod == 0) {
+                                                tempBookingId = "BK" + System.currentTimeMillis().toString().takeLast(6)
+                                                showPaymentGateway = true
+                                            } else {
+                                                saveBookingToFirebase("Chưa thanh toán")
+                                            }
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth().height(50.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = BluePrimary),
+                                shape = RoundedCornerShape(12.dp),
+                                enabled = !isSavingBooking
+                            ) {
+                                if (isSavingBooking) CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp))
+                                else Text(if (currentStep == 4) "Xác nhận đặt lịch" else "Tiếp Tục", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
                 }
             }
-        },
-        bottomBar = {
-            if (currentStep < 5) {
-                Box(modifier = Modifier.fillMaxWidth().background(Color.White).padding(16.dp)) {
+        ) { paddingValues ->
+            Box(modifier = Modifier.fillMaxSize().background(BgGray).padding(paddingValues)) {
+                Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
 
-                    // 🔴 3. KIỂM TRA NẾU BÁC SĨ OFFLINE -> KHÓA NÚT NGAY LẬP TỨC TRONG QUÁ TRÌNH BOOKING
-                    if (doctorRealtimeStatus == "offline") {
-                        Button(
-                            onClick = { Toast.makeText(context, "Xin lỗi, bác sĩ vừa báo bận đột xuất và không nhận thêm lịch hôm nay.", Toast.LENGTH_LONG).show() },
-                            modifier = Modifier.fillMaxWidth().height(50.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.Gray),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Text("Bác sĩ đang bận (Không nhận lịch)", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        }
-                    } else {
-                        // NẾU ONLINE -> HIỂN THỊ NÚT TIẾP TỤC / XÁC NHẬN BÌNH THƯỜNG
-                        Button(
-                            onClick = {
-                                when (currentStep) {
-                                    1 -> if (selectedService != null && selectedDate != null && selectedTime != null) currentStep++
-                                    2 -> if (selectedProfile != null) currentStep++
-                                    3 -> currentStep++
-                                    4 -> {
-                                        if (selectedPaymentMethod == 0) {
-                                            tempBookingId = "BK" + System.currentTimeMillis().toString().takeLast(6)
-                                            showPaymentGateway = true
-                                        } else {
-                                            saveBookingToFirebase("Chưa thanh toán")
+                    if (currentStep < 3 && currentStep != 2) {
+                        DoctorHeaderCard(doctor)
+                        Spacer(modifier = Modifier.height(16.dp))
+                    }
+
+                    when (currentStep) {
+                        1 -> {
+                            SectionTitle("Dịch vụ")
+                            ServiceSelectionCard(
+                                selected = selectedService,
+                                onSelect = { s, p -> selectedService = s; servicePrice = p; selectedDate = null; selectedTime = null }
+                            )
+
+                            AnimatedVisibility(visible = selectedService != null) {
+                                Column {
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    SectionTitle("Ngày khám")
+                                    DatePickerField(selectedDate = selectedDate) { datePickerDialog.show() }
+
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    AnimatedVisibility(visible = selectedDate != null) {
+                                        Column {
+                                            if (isFetchingTimes) {
+                                                Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                                                    CircularProgressIndicator(color = BluePrimary)
+                                                }
+                                            } else {
+                                                if (morningSlots.isNotEmpty()) {
+                                                    SectionTitle("Giờ khám (Buổi Sáng)")
+                                                    TimeSelectionGrid(morningSlots, selectedTime, disabledTimes) { selectedTime = it }
+                                                    Spacer(modifier = Modifier.height(8.dp))
+                                                }
+
+                                                if (afternoonSlots.isNotEmpty()) {
+                                                    SectionTitle("Giờ khám (Buổi Chiều)")
+                                                    TimeSelectionGrid(afternoonSlots, selectedTime, disabledTimes) { selectedTime = it }
+                                                }
+                                            }
                                         }
                                     }
                                 }
-                            },
-                            modifier = Modifier.fillMaxWidth().height(50.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = BluePrimary),
-                            shape = RoundedCornerShape(12.dp),
-                            enabled = !isSavingBooking
-                        ) {
-                            if (isSavingBooking) CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp))
-                            else Text(if (currentStep == 4) "Xác nhận đặt lịch" else "Tiếp Tục", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        2 -> {
+                            Text("Danh sách hồ sơ (${patientProfiles.size}/10)", color = Color(0xFF1A237E), fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 16.dp))
+                            if (isFetchingPatient) {
+                                Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = BluePrimary) }
+                            } else {
+                                patientProfiles.forEach { profile ->
+                                    PatientProfileCardUI(profile = profile, isSelected = selectedProfile?.id == profile.id) { selectedProfile = profile }
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Button(
+                                onClick = {
+                                    // 🔴 BẢO VỆ NÚT TẠO HỒ SƠ: HIỆN HỘP THOẠI NẾU LÀ KHÁCH
+                                    if (currentUser == null) {
+                                        showLoginDialog = true
+                                    } else {
+                                        context.startActivity(Intent(context, NewPatientRegistrationActivity::class.java))
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth().height(55.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = BluePrimary),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.Add, null, tint = Color.White)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Chưa từng khám đăng ký mới", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        3 -> {
+                            ConfirmInfoCard(doctor, selectedProfile?.fullName ?: "", selectedService ?: "", selectedDate ?: "", selectedTime ?: "", servicePrice)
+                            Spacer(modifier = Modifier.height(16.dp))
+                            SectionTitle("Dịch vụ giúp việc cá nhân (Tuỳ chọn)")
+                            AddonSelectionCard("Không cần", 0, addonService == "Không") { addonService = "Không"; addonPrice = 0 }
+                            AddonSelectionCard("Giúp việc cá nhân (3 giờ)", 399000, addonService == "Cơ bản") { addonService = "Cơ bản"; addonPrice = 399000 }
+                            AddonSelectionCard("Giúp việc Tiếng Anh (3 giờ)", 700000, addonService == "Tiếng Anh") { addonService = "Tiếng Anh"; addonPrice = 700000 }
+                            Spacer(modifier = Modifier.height(24.dp))
+                            SubTotalCard(servicePrice, addonPrice)
+                        }
+                        4 -> {
+                            ConfirmInfoCard(doctor, selectedProfile?.fullName ?: "", selectedService ?: "", selectedDate ?: "", selectedTime ?: "", servicePrice)
+                            Spacer(modifier = Modifier.height(16.dp))
+                            SectionTitle("Phương thức thanh toán")
+
+                            PaymentMethodSelector(
+                                selectedMethod = selectedPaymentMethod,
+                                onMethodSelected = { selectedPaymentMethod = it }
+                            )
+
+                            Spacer(modifier = Modifier.height(16.dp))
+                            DetailedBillCard(servicePrice, addonPrice, platformFee, discount)
+                        }
+                        5 -> {
+                            TicketScreen(
+                                doctor = doctor,
+                                patient = selectedProfile?.fullName ?: "",
+                                service = selectedService ?: "",
+                                date = selectedDate ?: "",
+                                time = selectedTime ?: "",
+                                total = finalTotal,
+                                ticketId = generatedTicketId,
+                                status = finalTicketStatus,
+                                onHome = onBack
+                            )
                         }
                     }
+                    Spacer(modifier = Modifier.height(80.dp))
                 }
             }
         }
-    ) { paddingValues ->
-        Box(modifier = Modifier.fillMaxSize().background(BgGray).padding(paddingValues)) {
-            Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
 
-                if (currentStep < 3 && currentStep != 2) {
-                    DoctorHeaderCard(doctor)
-                    Spacer(modifier = Modifier.height(16.dp))
-                }
-
-                when (currentStep) {
-                    1 -> {
-                        SectionTitle("Dịch vụ")
-                        ServiceSelectionCard(
-                            selected = selectedService,
-                            onSelect = { s, p -> selectedService = s; servicePrice = p; selectedDate = null; selectedTime = null }
-                        )
-
-                        AnimatedVisibility(visible = selectedService != null) {
-                            Column {
-                                Spacer(modifier = Modifier.height(16.dp))
-                                SectionTitle("Ngày khám")
-                                DatePickerField(selectedDate = selectedDate) { datePickerDialog.show() }
-
-                                Spacer(modifier = Modifier.height(16.dp))
-                                AnimatedVisibility(visible = selectedDate != null) {
-                                    Column {
-                                        if (isFetchingTimes) {
-                                            Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                                                CircularProgressIndicator(color = BluePrimary)
-                                            }
-                                        } else {
-                                            if (morningSlots.isNotEmpty()) {
-                                                SectionTitle("Giờ khám (Buổi Sáng)")
-                                                TimeSelectionGrid(morningSlots, selectedTime, disabledTimes) { selectedTime = it }
-                                                Spacer(modifier = Modifier.height(8.dp))
-                                            }
-
-                                            if (afternoonSlots.isNotEmpty()) {
-                                                SectionTitle("Giờ khám (Buổi Chiều)")
-                                                TimeSelectionGrid(afternoonSlots, selectedTime, disabledTimes) { selectedTime = it }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+        // 🔴 THIẾT KẾ UI CHO HỘP THOẠI THÔNG BÁO (ALERT DIALOG)
+        if (showLoginDialog) {
+            AlertDialog(
+                onDismissRequest = { showLoginDialog = false },
+                title = { Text("Yêu cầu đăng nhập", fontWeight = FontWeight.Bold) },
+                text = { Text("Tính năng này yêu cầu tài khoản. Bạn có muốn chuyển đến trang Đăng nhập để tiếp tục không?") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showLoginDialog = false
+                            context.startActivity(Intent(context, LoginActivity::class.java))
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = BluePrimary)
+                    ) {
+                        Text("Đăng nhập")
                     }
-                    2 -> {
-                        Text("Danh sách hồ sơ (${patientProfiles.size}/10)", color = Color(0xFF1A237E), fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 16.dp))
-                        if (isFetchingPatient) {
-                            Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = BluePrimary) }
-                        } else {
-                            patientProfiles.forEach { profile ->
-                                PatientProfileCardUI(profile = profile, isSelected = selectedProfile?.id == profile.id) { selectedProfile = profile }
-                                Spacer(modifier = Modifier.height(12.dp))
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Button(
-                            onClick = { context.startActivity(Intent(context, NewPatientRegistrationActivity::class.java)) },
-                            modifier = Modifier.fillMaxWidth().height(55.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = BluePrimary),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Icon(Icons.Default.Add, null, tint = Color.White)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Chưa từng khám đăng ký mới", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                        }
+                },
+                dismissButton = {
+                    OutlinedButton(onClick = { showLoginDialog = false }) {
+                        Text("Hủy", color = Color.Gray)
                     }
-                    3 -> {
-                        ConfirmInfoCard(doctor, selectedProfile?.fullName ?: "", selectedService ?: "", selectedDate ?: "", selectedTime ?: "", servicePrice)
-                        Spacer(modifier = Modifier.height(16.dp))
-                        SectionTitle("Dịch vụ giúp việc cá nhân (Tuỳ chọn)")
-                        AddonSelectionCard("Không cần", 0, addonService == "Không") { addonService = "Không"; addonPrice = 0 }
-                        AddonSelectionCard("Giúp việc cá nhân (3 giờ)", 399000, addonService == "Cơ bản") { addonService = "Cơ bản"; addonPrice = 399000 }
-                        AddonSelectionCard("Giúp việc Tiếng Anh (3 giờ)", 700000, addonService == "Tiếng Anh") { addonService = "Tiếng Anh"; addonPrice = 700000 }
-                        Spacer(modifier = Modifier.height(24.dp))
-                        SubTotalCard(servicePrice, addonPrice)
-                    }
-                    4 -> {
-                        ConfirmInfoCard(doctor, selectedProfile?.fullName ?: "", selectedService ?: "", selectedDate ?: "", selectedTime ?: "", servicePrice)
-                        Spacer(modifier = Modifier.height(16.dp))
-                        SectionTitle("Phương thức thanh toán")
-
-                        PaymentMethodSelector(
-                            selectedMethod = selectedPaymentMethod,
-                            onMethodSelected = { selectedPaymentMethod = it }
-                        )
-
-                        Spacer(modifier = Modifier.height(16.dp))
-                        DetailedBillCard(servicePrice, addonPrice, platformFee, discount)
-                    }
-                    5 -> {
-                        TicketScreen(
-                            doctor = doctor,
-                            patient = selectedProfile?.fullName ?: "",
-                            service = selectedService ?: "",
-                            date = selectedDate ?: "",
-                            time = selectedTime ?: "",
-                            total = finalTotal,
-                            ticketId = generatedTicketId,
-                            status = finalTicketStatus,
-                            onHome = onBack
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(80.dp))
-            }
+                },
+                containerColor = Color.White
+            )
         }
     }
 }
@@ -495,7 +534,7 @@ fun PaymentGatewayScreen(
     val minutes = String.format("%02d", timeLeft / 60)
     val seconds = String.format("%02d", timeLeft % 60)
 
-    val qrUrl = "https://img.vietqr.io/image/970422-0123456789-compact2.png?amount=$amount&addInfo=$bookingId&accountName=NGUYEN NGOC SON"
+    val qrUrl = "https://img.vietqr.io/image/970422-0826778435-compact2.png?amount=$amount&addInfo=$bookingId&accountName=NGUYEN NGOC SON"
 
     Dialog(
         onDismissRequest = onCancel,

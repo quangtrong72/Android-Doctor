@@ -1,5 +1,6 @@
 package com.uilover.project1983.Chat
 
+import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -30,6 +31,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
+import com.uilover.project1983.Activity.LoginActivity // NHỚ IMPORT LoginActivity
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -57,6 +59,10 @@ fun ChatDetailScreen(
 ) {
     val context = LocalContext.current
     val currentUserId = FirebaseAuth.getInstance().currentUser?.uid ?: ""
+
+    // 🔴 KIỂM TRA KHÁCH: Nếu chưa đăng nhập, tự động hiện Dialog
+    var showLoginDialog by remember { mutableStateOf(currentUserId.isEmpty()) }
+
     var messageText by remember { mutableStateOf("") }
     var messages by remember { mutableStateOf<List<MessageModel>>(emptyList()) }
     val listState = rememberLazyListState()
@@ -97,8 +103,6 @@ fun ChatDetailScreen(
                     }
                     messages = loadedMessages
 
-                    // 🔴 ĐÃ FIX LỖI MẤT IN ĐẬM:
-                    // Chỉ cập nhật thành "Đã đọc" (isRead = true) khi tin nhắn cuối cùng trong phòng là do ĐỐI PHƯƠNG gửi đến cho mình
                     if (loadedMessages.isNotEmpty()) {
                         val lastMessage = loadedMessages.last()
                         if (!lastMessage.isFromMe) {
@@ -154,7 +158,6 @@ fun ChatDetailScreen(
         db.collection("Chats").document(roomId).collection("Messages").add(msgData)
             .addOnFailureListener { e -> Toast.makeText(context, "Gửi thất bại: ${e.message}", Toast.LENGTH_LONG).show() }
 
-        // Gửi tin nhắn mới đặt mặc định phòng chat là chưa đọc (isRead = false)
         val roomData = hashMapOf(
             "participants" to listOf(currentUserId, receiverId),
             "lastMessage" to text.trim(),
@@ -205,14 +208,15 @@ fun ChatDetailScreen(
                         modifier = Modifier.weight(1f).shadow(4.dp, RoundedCornerShape(30.dp)),
                         placeholder = { Text("Type messages...", fontSize = 14.sp, color = Color.Gray) },
                         colors = TextFieldDefaults.colors(focusedContainerColor = Color.White, unfocusedContainerColor = Color.White, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, cursorColor = Color(0xFF66BB6A)),
-                        shape = RoundedCornerShape(30.dp)
+                        shape = RoundedCornerShape(30.dp),
+                        enabled = currentUserId.isNotEmpty() // Khóa không cho gõ nếu là Khách
                     )
                     Spacer(modifier = Modifier.width(12.dp))
                     Box(modifier = Modifier.size(40.dp).clip(CircleShape).background(Color.White).shadow(2.dp, CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Outlined.Mic, contentDescription = "Mic", tint = Color.Black, modifier = Modifier.size(24.dp)) }
                     Spacer(modifier = Modifier.width(8.dp))
                     Box(
                         modifier = Modifier.size(45.dp).clip(CircleShape).background(if (messageText.isNotBlank()) GradientSend else Brush.linearGradient(listOf(Color.Gray, Color.LightGray)))
-                            .clickable(enabled = messageText.isNotBlank(), onClick = { sendMessageToFirestore(messageText) }),
+                            .clickable(enabled = messageText.isNotBlank() && currentUserId.isNotEmpty(), onClick = { sendMessageToFirestore(messageText) }),
                         contentAlignment = Alignment.Center
                     ) { Icon(Icons.Default.Send, contentDescription = "Send", tint = Color.White, modifier = Modifier.size(20.dp).padding(start = 2.dp)) }
                 }
@@ -226,6 +230,39 @@ fun ChatDetailScreen(
                 items(messages) { msg -> ChatBubble(message = msg) }
                 item { Spacer(modifier = Modifier.height(16.dp)) }
             }
+        }
+
+        // 🔴 HIỂN THỊ HỘP THOẠI YÊU CẦU ĐĂNG NHẬP
+        if (showLoginDialog) {
+            AlertDialog(
+                onDismissRequest = {
+                    showLoginDialog = false
+                    onBackClick() // Nếu click ra ngoài viền, ép quay lại màn hình trước
+                },
+                title = { Text("Yêu cầu đăng nhập", fontWeight = FontWeight.Bold) },
+                text = { Text("Vui lòng đăng nhập để có thể nhắn tin với Bác sĩ.") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showLoginDialog = false
+                            context.startActivity(Intent(context, LoginActivity::class.java))
+                            onBackClick()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E88E5))
+                    ) {
+                        Text("Đăng nhập")
+                    }
+                },
+                dismissButton = {
+                    OutlinedButton(onClick = {
+                        showLoginDialog = false
+                        onBackClick() // Bấm Hủy sẽ quay về màn hình trước
+                    }) {
+                        Text("Hủy", color = Color.Gray)
+                    }
+                },
+                containerColor = Color.White
+            )
         }
 
         if (showIncomingCallDialog) {

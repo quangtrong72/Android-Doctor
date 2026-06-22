@@ -3,10 +3,10 @@ package com.uilover.project1983.Activity
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
-import androidx.compose.foundation.BorderStroke
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -30,7 +30,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.database.FirebaseDatabase // Đã FIX: Đổi về Realtime Database
+import com.google.firebase.database.FirebaseDatabase
 
 // Định nghĩa bộ màu Medical Blue hiện đại
 val MedicalPrimary = Color(0xFF1E88E5)
@@ -43,7 +43,6 @@ val SocialFbBlue = Color(0xFF4267B2)
 class LoginActivity : ComponentActivity() {
 
     private val auth = FirebaseAuth.getInstance()
-    // Đã FIX: Khởi tạo biến cho Realtime Database
     private val realtimeDb = FirebaseDatabase.getInstance()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -62,6 +61,12 @@ class LoginActivity : ComponentActivity() {
                         onAuthSuccess = { uid ->
                             checkRoleAndNavigate(uid)
                         },
+                        // 🔴 BỔ SUNG: Xử lý sự kiện đăng nhập dưới tư cách Khách
+                        onGuestLogin = {
+                            Toast.makeText(this, "Đang vào chế độ Khách", Toast.LENGTH_SHORT).show()
+                            startActivity(Intent(this, MainActivity::class.java))
+                            finish()
+                        },
                         auth = auth
                     )
                 }
@@ -69,18 +74,15 @@ class LoginActivity : ComponentActivity() {
         }
     }
 
-    // 🔴 HÀM KIỂM TRA QUYỀN VÀ CHUYỂN TRANG BẰNG REALTIME DATABASE
     private fun checkRoleAndNavigate(uid: String) {
         realtimeDb.getReference("Users").child(uid).get()
             .addOnSuccessListener { snapshot ->
                 if (snapshot.exists()) {
-                    // Lấy giá trị role từ Realtime Database
                     val role = snapshot.child("role").getValue(String::class.java)?.uppercase() ?: "PATIENT"
 
                     when (role) {
                         "DOCTOR" -> {
                             Toast.makeText(this, "Xin chào Bác sĩ", Toast.LENGTH_SHORT).show()
-                            // Chuyển đúng vào package Doctor
                             startActivity(Intent(this, com.uilover.project1983.Doctor.DoctorMainActivity::class.java))
                         }
                         "ADMIN" -> {
@@ -88,14 +90,12 @@ class LoginActivity : ComponentActivity() {
                             // TODO: Chuyển sang AdminPanelActivity
                         }
                         else -> {
-                            // Mặc định những user khác (PATIENT) sẽ vào giao diện người dùng
                             Toast.makeText(this, "Xin chào Bệnh nhân", Toast.LENGTH_SHORT).show()
                             startActivity(Intent(this, MainActivity::class.java))
                         }
                     }
-                    finish() // Đóng màn hình đăng nhập
+                    finish()
                 } else {
-                    // Nếu không tìm thấy node của UID này trên Database
                     Toast.makeText(this, "Đăng nhập thành công", Toast.LENGTH_SHORT).show()
                     startActivity(Intent(this, MainActivity::class.java))
                     finish()
@@ -112,6 +112,7 @@ class LoginActivity : ComponentActivity() {
 fun LoginScreen(
     onNavigateToRegister: () -> Unit,
     onAuthSuccess: (String) -> Unit,
+    onGuestLogin: () -> Unit, // 🔴 BỔ SUNG CALLBACK NÀY
     auth: FirebaseAuth
 ) {
     var email by rememberSaveable { mutableStateOf("") }
@@ -272,6 +273,19 @@ fun LoginScreen(
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.clickable { onNavigateToRegister() }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // 🔴 BỔ SUNG: NÚT VÀO ỨNG DỤNG BẰNG CHẾ ĐỘ KHÁCH
+                TextButton(onClick = { onGuestLogin() }) {
+                    Text(
+                        "Tiếp tục với tư cách Khách",
+                        color = TextGray,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
                     )
                 }
             }
